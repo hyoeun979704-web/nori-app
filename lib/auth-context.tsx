@@ -1,4 +1,3 @@
-import { AppState } from "react-native";
 import {
   createContext,
   useContext,
@@ -7,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { AppState } from "react-native";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 
@@ -22,14 +22,6 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
-
-AppState.addEventListener("change", (state) => {
-  if (state === "active") {
-    void supabase.auth.startAutoRefresh();
-  } else {
-    void supabase.auth.stopAutoRefresh();
-  }
-});
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -49,6 +41,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mounted = false;
       data.subscription.unsubscribe();
     };
+  }, []);
+
+  // Keep the JWT fresh while the app is foregrounded. Registering inside an
+  // effect (not at module scope) prevents HMR from attaching duplicate
+  // listeners and guarantees cleanup on sign-out or unmount.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") void supabase.auth.startAutoRefresh();
+      else void supabase.auth.stopAutoRefresh();
+    });
+    return () => sub.remove();
   }, []);
 
   const value = useMemo<AuthContextValue>(

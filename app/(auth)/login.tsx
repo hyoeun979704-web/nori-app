@@ -5,12 +5,13 @@ import {
   Platform,
   Pressable,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { Link, router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { FormField } from "@/components/ui/FormField";
 import { useAuth } from "@/lib/auth-context";
+import { friendlyError } from "@/lib/error-messages";
 
 export default function Login() {
   const { signIn } = useAuth();
@@ -29,7 +30,7 @@ export default function Login() {
     const { error: err } = await signIn(email.trim(), password);
     setSubmitting(false);
     if (err) {
-      setError(err);
+      setError(friendlyError(new Error(err)));
       return;
     }
     router.replace("/(app)");
@@ -48,35 +49,26 @@ export default function Login() {
           </Text>
 
           <View className="mt-10 gap-4">
-            <View>
-              <Text className="mb-1 text-sm text-slate-600">이메일</Text>
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                autoComplete="email"
-                keyboardType="email-address"
-                placeholder="you@example.com"
-                placeholderTextColor="#94a3b8"
-                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900"
-              />
-            </View>
-            <View>
-              <Text className="mb-1 text-sm text-slate-600">비밀번호</Text>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                autoComplete="password"
-                secureTextEntry
-                placeholder="••••••••"
-                placeholderTextColor="#94a3b8"
-                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900"
-              />
-            </View>
-
-            {error ? (
-              <Text className="text-sm text-red-600">{error}</Text>
-            ) : null}
+            <FormField
+              label="이메일"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoComplete="email"
+              keyboardType="email-address"
+              placeholder="you@example.com"
+              accessibilityLabel="이메일 입력"
+            />
+            <FormField
+              label="비밀번호"
+              value={password}
+              onChangeText={setPassword}
+              autoComplete="password"
+              secureTextEntry
+              placeholder="••••••••"
+              accessibilityLabel="비밀번호 입력"
+              error={error}
+            />
 
             <Pressable
               onPress={onSubmit}
@@ -88,9 +80,7 @@ export default function Login() {
               {submitting ? (
                 <ActivityIndicator color="white" />
               ) : (
-                <Text className="text-base font-semibold text-white">
-                  로그인
-                </Text>
+                <Text className="text-base font-semibold text-white">로그인</Text>
               )}
             </Pressable>
           </View>

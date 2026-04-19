@@ -6,16 +6,18 @@ import {
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
-import { INTERESTS } from "@/lib/interests";
-import { createChildWithSurvey } from "@/lib/children";
-import { useChild } from "@/lib/child-context";
+import { BirthDateField } from "@/components/feature/child/BirthDateField";
+import { InterestChips } from "@/components/feature/child/InterestChips";
+import { FormField } from "@/components/ui/FormField";
 import { formatDateISO } from "@/lib/age";
+import { useChild } from "@/lib/child-context";
+import { createChildWithSurvey } from "@/lib/children";
+import { friendlyError } from "@/lib/error-messages";
+import { splitTags } from "@/lib/form-utils";
 
 type Step = 0 | 1 | 2 | 3;
 
@@ -37,7 +39,7 @@ export default function Onboarding() {
   const [error, setError] = useState<string | null>(null);
 
   const trimmedNickname = nickname.trim();
-  const canNextFromStep = useMemo(() => {
+  const canAdvance = useMemo(() => {
     if (step === 0)
       return trimmedNickname.length >= 1 && trimmedNickname.length <= 20;
     if (step === 1) return birthDate !== null;
@@ -45,19 +47,7 @@ export default function Onboarding() {
     return true;
   }, [step, trimmedNickname, birthDate, interests]);
 
-  const toggleInterest = (value: string) => {
-    setInterests((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
-    );
-  };
-
-  const splitTags = (raw: string): string[] =>
-    raw
-      .split(/[,\n]/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-
-  const onSubmit = async () => {
+  const submit = async () => {
     if (!birthDate) return;
     setSubmitting(true);
     setError(null);
@@ -73,16 +63,15 @@ export default function Onboarding() {
       await refresh();
       router.replace("/(app)");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
+      setError(friendlyError(e));
       setSubmitting(false);
     }
   };
 
   const goNext = () => {
     if (step < 3) setStep((step + 1) as Step);
-    else void onSubmit();
+    else void submit();
   };
-
   const goBack = () => {
     if (step > 0) setStep((step - 1) as Step);
   };
@@ -122,17 +111,16 @@ export default function Onboarding() {
               <Text className="mt-2 text-sm text-slate-500">
                 노리가 대화할 때 이 이름을 사용해요. 실명이 아니어도 좋아요.
               </Text>
-              <TextInput
-                value={nickname}
-                onChangeText={setNickname}
-                placeholder="예) 율이"
-                placeholderTextColor="#94a3b8"
-                maxLength={20}
-                className="mt-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900"
-              />
-              <Text className="mt-1 text-right text-xs text-slate-400">
-                {trimmedNickname.length} / 20
-              </Text>
+              <View className="mt-6">
+                <FormField
+                  value={nickname}
+                  onChangeText={setNickname}
+                  placeholder="예) 율이"
+                  maxLength={20}
+                  accessibilityLabel="자녀 닉네임"
+                  hint={`${trimmedNickname.length} / 20`}
+                />
+              </View>
             </View>
           )}
 
@@ -144,47 +132,14 @@ export default function Onboarding() {
               <Text className="mt-2 text-sm text-slate-500">
                 개월 수에 맞는 놀이를 추천하는 데에만 사용해요.
               </Text>
-
-              <Pressable
-                onPress={() => setShowPicker(true)}
-                accessibilityRole="button"
-                accessibilityLabel="생년월일 선택"
-                className="mt-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 active:opacity-80"
-              >
-                <Text
-                  className={`text-base ${
-                    birthDate ? "text-slate-900" : "text-slate-400"
-                  }`}
-                >
-                  {birthDate ? formatDateISO(birthDate) : "날짜 선택"}
-                </Text>
-              </Pressable>
-
-              {showPicker && (
-                <View className="mt-4">
-                  <DateTimePicker
-                    value={birthDate ?? new Date()}
-                    mode="date"
-                    display={Platform.OS === "ios" ? "inline" : "default"}
-                    maximumDate={new Date()}
-                    onChange={(event, selected) => {
-                      if (Platform.OS !== "ios") setShowPicker(false);
-                      if (event.type === "dismissed") return;
-                      if (selected) setBirthDate(selected);
-                    }}
-                  />
-                  {Platform.OS === "ios" ? (
-                    <Pressable
-                      onPress={() => setShowPicker(false)}
-                      className="mt-2 items-center rounded-xl border border-slate-200 bg-white py-3 active:opacity-70"
-                    >
-                      <Text className="text-sm font-semibold text-slate-700">
-                        확인
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              )}
+              <View className="mt-6">
+                <BirthDateField
+                  value={birthDate}
+                  onChange={setBirthDate}
+                  visible={showPicker}
+                  setVisible={setShowPicker}
+                />
+              </View>
             </View>
           )}
 
@@ -196,29 +151,8 @@ export default function Onboarding() {
               <Text className="mt-2 text-sm text-slate-500">
                 하나 이상 골라주세요. 언제든 바꿀 수 있어요.
               </Text>
-              <View className="mt-6 flex-row flex-wrap gap-2">
-                {INTERESTS.map((it) => {
-                  const selected = interests.includes(it);
-                  return (
-                    <Pressable
-                      key={it}
-                      onPress={() => toggleInterest(it)}
-                      className={`rounded-full border px-4 py-2 ${
-                        selected
-                          ? "border-slate-900 bg-slate-900"
-                          : "border-slate-200 bg-white"
-                      }`}
-                    >
-                      <Text
-                        className={`text-sm ${
-                          selected ? "text-white" : "text-slate-700"
-                        }`}
-                      >
-                        {it}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+              <View className="mt-6">
+                <InterestChips value={interests} onChange={setInterests} />
               </View>
             </View>
           )}
@@ -232,50 +166,30 @@ export default function Onboarding() {
                 아이에게 더 안전한 놀이를 추천하기 위한 정보예요. 건너뛰어도
                 됩니다.
               </Text>
-
               <View className="mt-6 gap-5">
-                <View>
-                  <Text className="text-sm text-slate-600">
-                    알레르기 (쉼표로 구분)
-                  </Text>
-                  <TextInput
-                    value={allergies}
-                    onChangeText={setAllergies}
-                    placeholder="예) 땅콩, 계란"
-                    placeholderTextColor="#94a3b8"
-                    className="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900"
-                  />
-                </View>
-                <View>
-                  <Text className="text-sm text-slate-600">
-                    민감하게 반응하는 것 (쉼표로 구분)
-                  </Text>
-                  <TextInput
-                    value={sensitivities}
-                    onChangeText={setSensitivities}
-                    placeholder="예) 큰 소리, 끈적한 촉감"
-                    placeholderTextColor="#94a3b8"
-                    className="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900"
-                  />
-                </View>
-                <View>
-                  <Text className="text-sm text-slate-600">그 외 메모</Text>
-                  <TextInput
-                    value={notes}
-                    onChangeText={setNotes}
-                    placeholder="노리가 참고하면 좋을 만한 이야기를 자유롭게 써 주세요."
-                    placeholderTextColor="#94a3b8"
-                    multiline
-                    numberOfLines={4}
-                    className="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900"
-                    style={{ minHeight: 100, textAlignVertical: "top" }}
-                  />
-                </View>
+                <FormField
+                  label="알레르기 (쉼표로 구분)"
+                  value={allergies}
+                  onChangeText={setAllergies}
+                  placeholder="예) 땅콩, 계란"
+                />
+                <FormField
+                  label="민감하게 반응하는 것 (쉼표로 구분)"
+                  value={sensitivities}
+                  onChangeText={setSensitivities}
+                  placeholder="예) 큰 소리, 끈적한 촉감"
+                />
+                <FormField
+                  label="그 외 메모"
+                  value={notes}
+                  onChangeText={setNotes}
+                  placeholder="노리가 참고하면 좋을 만한 이야기를 자유롭게 써 주세요."
+                  multiline
+                />
               </View>
-
               <Text className="mt-6 text-xs text-slate-400">
-                입력한 내용은 놀이 추천을 위해서만 쓰이고, 앱 화면에는
-                표시되지 않아요.
+                입력한 내용은 놀이 추천을 위해서만 쓰이고, 앱 화면에는 표시되지
+                않아요.
               </Text>
             </View>
           )}
@@ -290,6 +204,8 @@ export default function Onboarding() {
             <Pressable
               onPress={goBack}
               disabled={submitting}
+              accessibilityRole="button"
+              accessibilityLabel="이전"
               className="flex-1 items-center rounded-xl border border-slate-200 py-4 active:opacity-80 disabled:opacity-50"
             >
               <Text className="text-base font-semibold text-slate-700">
@@ -299,7 +215,9 @@ export default function Onboarding() {
           ) : null}
           <Pressable
             onPress={goNext}
-            disabled={!canNextFromStep || submitting}
+            disabled={!canAdvance || submitting}
+            accessibilityRole="button"
+            accessibilityLabel={step < 3 ? "다음 단계" : "시작하기"}
             className="flex-[2] items-center rounded-xl bg-slate-900 py-4 active:opacity-80 disabled:opacity-50"
           >
             {submitting ? (

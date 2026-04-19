@@ -7,22 +7,21 @@ import {
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
+import { BirthDateField } from "@/components/feature/child/BirthDateField";
+import { InterestChips } from "@/components/feature/child/InterestChips";
+import { FormField } from "@/components/ui/FormField";
+import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { deleteMyAccount } from "@/lib/account";
+import { formatAgeKo, formatDateISO } from "@/lib/age";
 import { useAuth } from "@/lib/auth-context";
 import { useChild } from "@/lib/child-context";
-import { formatAgeKo, formatDateISO } from "@/lib/age";
-import {
-  getMySurvey,
-  updateChildWithSurvey,
-} from "@/lib/children";
-import { deleteMyAccount } from "@/lib/account";
+import { getMySurvey, updateChildWithSurvey } from "@/lib/children";
 import { friendlyError } from "@/lib/error-messages";
-import { INTERESTS } from "@/lib/interests";
+import { splitTags } from "@/lib/form-utils";
 
 export default function Profile() {
   const { child, refresh } = useChild();
@@ -62,26 +61,15 @@ export default function Profile() {
   }, [child]);
 
   const trimmedNickname = nickname.trim();
-  const canSave = useMemo(() => {
-    return (
+  const canSave = useMemo(
+    () =>
       !!child &&
       trimmedNickname.length >= 1 &&
       trimmedNickname.length <= 20 &&
       birthDate !== null &&
-      interests.length >= 1
-    );
-  }, [child, trimmedNickname, birthDate, interests]);
-
-  const toggleInterest = (value: string) => {
-    setInterests((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
-    );
-  };
-  const splitTags = (raw: string): string[] =>
-    raw
-      .split(/[,\n]/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+      interests.length >= 1,
+    [child, trimmedNickname, birthDate, interests],
+  );
 
   const onSave = useCallback(async () => {
     if (!child || !birthDate) return;
@@ -131,13 +119,7 @@ export default function Profile() {
     );
   }, [signOut]);
 
-  if (!child || initialLoading) {
-    return (
-      <SafeAreaView className="flex-1 items-center justify-center bg-white">
-        <ActivityIndicator />
-      </SafeAreaView>
-    );
-  }
+  if (!child || initialLoading) return <LoadingScreen />;
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -151,7 +133,9 @@ export default function Profile() {
         >
           <Text className="text-base text-slate-600">←</Text>
         </Pressable>
-        <Text className="text-base font-semibold text-slate-900">프로필 관리</Text>
+        <Text className="text-base font-semibold text-slate-900">
+          프로필 관리
+        </Text>
         <View className="w-8" />
       </View>
 
@@ -169,117 +153,47 @@ export default function Profile() {
           </Text>
 
           <View className="mt-4 gap-5">
+            <FormField
+              label="닉네임"
+              value={nickname}
+              onChangeText={setNickname}
+              maxLength={20}
+              accessibilityLabel="자녀 닉네임"
+            />
+
             <View>
-              <Text className="text-sm text-slate-600">닉네임</Text>
-              <TextInput
-                value={nickname}
-                onChangeText={setNickname}
-                maxLength={20}
-                accessibilityLabel="자녀 닉네임"
-                className="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900"
+              <Text className="mb-1 text-sm text-slate-600">생년월일</Text>
+              <BirthDateField
+                value={birthDate}
+                onChange={setBirthDate}
+                visible={showPicker}
+                setVisible={setShowPicker}
               />
             </View>
 
             <View>
-              <Text className="text-sm text-slate-600">생년월일</Text>
-              <Pressable
-                onPress={() => setShowPicker(true)}
-                accessibilityRole="button"
-                accessibilityLabel="생년월일 수정"
-                className="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 active:opacity-80"
-              >
-                <Text className="text-base text-slate-900">
-                  {birthDate ? formatDateISO(birthDate) : "날짜 선택"}
-                </Text>
-              </Pressable>
-              {showPicker && (
-                <View className="mt-2">
-                  <DateTimePicker
-                    value={birthDate ?? new Date()}
-                    mode="date"
-                    display={Platform.OS === "ios" ? "inline" : "default"}
-                    maximumDate={new Date()}
-                    onChange={(event, selected) => {
-                      if (Platform.OS !== "ios") setShowPicker(false);
-                      if (event.type === "dismissed") return;
-                      if (selected) setBirthDate(selected);
-                    }}
-                  />
-                  {Platform.OS === "ios" ? (
-                    <Pressable
-                      onPress={() => setShowPicker(false)}
-                      className="mt-2 items-center rounded-xl border border-slate-200 bg-white py-3 active:opacity-70"
-                    >
-                      <Text className="text-sm font-semibold text-slate-700">
-                        확인
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              )}
+              <Text className="mb-2 text-sm text-slate-600">관심사</Text>
+              <InterestChips value={interests} onChange={setInterests} />
             </View>
 
-            <View>
-              <Text className="text-sm text-slate-600">관심사</Text>
-              <View className="mt-2 flex-row flex-wrap gap-2">
-                {INTERESTS.map((it) => {
-                  const selected = interests.includes(it);
-                  return (
-                    <Pressable
-                      key={it}
-                      onPress={() => toggleInterest(it)}
-                      accessibilityRole="checkbox"
-                      accessibilityState={{ checked: selected }}
-                      accessibilityLabel={it}
-                      className={`rounded-full border px-4 py-2 ${
-                        selected
-                          ? "border-slate-900 bg-slate-900"
-                          : "border-slate-200 bg-white"
-                      }`}
-                    >
-                      <Text
-                        className={`text-sm ${
-                          selected ? "text-white" : "text-slate-700"
-                        }`}
-                      >
-                        {it}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-
-            <View>
-              <Text className="text-sm text-slate-600">알레르기 (쉼표로 구분)</Text>
-              <TextInput
-                value={allergies}
-                onChangeText={setAllergies}
-                placeholder="예) 땅콩, 계란"
-                placeholderTextColor="#94a3b8"
-                className="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900"
-              />
-            </View>
-            <View>
-              <Text className="text-sm text-slate-600">민감 반응 (쉼표로 구분)</Text>
-              <TextInput
-                value={sensitivities}
-                onChangeText={setSensitivities}
-                placeholder="예) 큰 소리, 끈적한 촉감"
-                placeholderTextColor="#94a3b8"
-                className="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900"
-              />
-            </View>
-            <View>
-              <Text className="text-sm text-slate-600">그 외 메모</Text>
-              <TextInput
-                value={notes}
-                onChangeText={setNotes}
-                multiline
-                className="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900"
-                style={{ minHeight: 100, textAlignVertical: "top" }}
-              />
-            </View>
+            <FormField
+              label="알레르기 (쉼표로 구분)"
+              value={allergies}
+              onChangeText={setAllergies}
+              placeholder="예) 땅콩, 계란"
+            />
+            <FormField
+              label="민감 반응 (쉼표로 구분)"
+              value={sensitivities}
+              onChangeText={setSensitivities}
+              placeholder="예) 큰 소리, 끈적한 촉감"
+            />
+            <FormField
+              label="그 외 메모"
+              value={notes}
+              onChangeText={setNotes}
+              multiline
+            />
           </View>
 
           {error ? (
@@ -304,16 +218,12 @@ export default function Profile() {
           </Pressable>
 
           <View className="mt-12 border-t border-slate-100 pt-6">
-            <Text className="text-sm font-semibold text-slate-700">
-              도움말
-            </Text>
+            <Text className="text-sm font-semibold text-slate-700">도움말</Text>
             <Pressable
               onPress={() => router.push("/legal/privacy")}
               className="mt-2 active:opacity-70"
             >
-              <Text className="text-sm text-slate-500">
-                · 개인정보 처리방침
-              </Text>
+              <Text className="text-sm text-slate-500">· 개인정보 처리방침</Text>
             </Pressable>
             <Pressable
               onPress={() => router.push("/legal/terms")}
@@ -324,9 +234,7 @@ export default function Profile() {
           </View>
 
           <View className="mt-10 rounded-2xl border border-red-200 bg-red-50 p-4">
-            <Text className="text-sm font-semibold text-red-800">
-              계정 삭제
-            </Text>
+            <Text className="text-sm font-semibold text-red-800">계정 삭제</Text>
             <Text className="mt-1 text-xs leading-5 text-red-700">
               자녀 프로필, 대화 내역, 받은 레시피를 포함해 모든 데이터가 즉시
               사라지고 되돌릴 수 없어요.

@@ -5,12 +5,13 @@ import {
   Platform,
   Pressable,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { Link, router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { FormField } from "@/components/ui/FormField";
 import { useAuth } from "@/lib/auth-context";
+import { friendlyError } from "@/lib/error-messages";
 
 export default function SignUp() {
   const { signUp } = useAuth();
@@ -35,12 +36,10 @@ export default function SignUp() {
     const { error: err } = await signUp(email.trim(), password);
     setSubmitting(false);
     if (err) {
-      setError(err);
+      setError(friendlyError(new Error(err)));
       return;
     }
-    setInfo(
-      "가입 확인 메일을 보냈어요. 메일함에서 인증 링크를 눌러 주세요.",
-    );
+    setInfo("가입 확인 메일을 보냈어요. 메일함에서 인증 링크를 눌러 주세요.");
   };
 
   return (
@@ -50,7 +49,11 @@ export default function SignUp() {
         className="flex-1"
       >
         <View className="flex-1 px-6 pt-16">
-          <Pressable onPress={() => router.back()}>
+          <Pressable
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel="뒤로"
+          >
             <Text className="text-sm text-slate-500">← 뒤로</Text>
           </Pressable>
 
@@ -62,37 +65,27 @@ export default function SignUp() {
           </Text>
 
           <View className="mt-10 gap-4">
-            <View>
-              <Text className="mb-1 text-sm text-slate-600">이메일</Text>
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                autoComplete="email"
-                keyboardType="email-address"
-                placeholder="you@example.com"
-                placeholderTextColor="#94a3b8"
-                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900"
-              />
-            </View>
-            <View>
-              <Text className="mb-1 text-sm text-slate-600">
-                비밀번호 (8자 이상)
-              </Text>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                autoComplete="password-new"
-                secureTextEntry
-                placeholder="••••••••"
-                placeholderTextColor="#94a3b8"
-                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900"
-              />
-            </View>
+            <FormField
+              label="이메일"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoComplete="email"
+              keyboardType="email-address"
+              placeholder="you@example.com"
+              accessibilityLabel="이메일 입력"
+            />
+            <FormField
+              label="비밀번호 (8자 이상)"
+              value={password}
+              onChangeText={setPassword}
+              autoComplete="password-new"
+              secureTextEntry
+              placeholder="••••••••"
+              accessibilityLabel="비밀번호 입력"
+              error={error}
+            />
 
-            {error ? (
-              <Text className="text-sm text-red-600">{error}</Text>
-            ) : null}
             {info ? (
               <Text className="text-sm text-emerald-700">{info}</Text>
             ) : null}
@@ -100,6 +93,8 @@ export default function SignUp() {
             <Pressable
               onPress={onSubmit}
               disabled={submitting}
+              accessibilityRole="button"
+              accessibilityLabel="가입하기"
               className="mt-2 items-center rounded-xl bg-slate-900 py-4 active:opacity-80 disabled:opacity-50"
             >
               {submitting ? (
@@ -121,8 +116,8 @@ export default function SignUp() {
             <Link href="/legal/privacy" className="text-slate-500 underline">
               개인정보 처리방침
             </Link>
-            에 동의하신 것으로 간주됩니다. 자녀 정보 처리에 대한
-            법정대리인 동의를 함께 포함합니다.
+            에 동의하신 것으로 간주됩니다. 자녀 정보 처리에 대한 법정대리인
+            동의를 함께 포함합니다.
           </Text>
 
           <View className="mt-6 flex-row justify-center">

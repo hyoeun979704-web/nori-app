@@ -11,7 +11,3 @@ export const INTERESTS = [
 ] as const;
 
 export type Interest = (typeof INTERESTS)[number];
-
-export function isValidInterest(value: string): value is Interest {
-  return (INTERESTS as readonly string[]).includes(value);
-}

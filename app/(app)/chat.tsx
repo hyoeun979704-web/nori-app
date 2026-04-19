@@ -13,23 +13,51 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { MessageBubble } from "@/components/feature/chat/MessageBubble";
 import { RecipeCard } from "@/components/feature/chat/RecipeCard";
+import { LoadingScreen } from "@/components/ui/LoadingScreen";
 import { useSpeechToText } from "@/hooks/useSpeechToText";
-import { useChild } from "@/lib/child-context";
 import {
   insertNoriRecipe,
   insertNoriText,
   insertUserText,
   loadRecentMessages,
 } from "@/lib/chat";
-import { askForRecipe } from "@/lib/recipe-api";
-import { insertRecipe } from "@/lib/recipes";
-import { containsRedFlag, RED_FLAG_MESSAGE } from "@/lib/red-flags";
+import { useChild } from "@/lib/child-context";
 import { friendlyError } from "@/lib/error-messages";
+import { askForRecipe } from "@/lib/recipe-api";
+import { containsRedFlag, RED_FLAG_MESSAGE } from "@/lib/red-flags";
+import { insertRecipe } from "@/lib/recipes";
 import { getVoiceContinuous, setVoiceContinuous } from "@/lib/settings";
+import { uid } from "@/lib/uid";
 import type { ChatMessage } from "@/types/chat";
 
-function uid(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+function greeting(nickname: string): ChatMessage {
+  return {
+    id: uid(),
+    role: "nori",
+    kind: "text",
+    text: `안녕하세요! ${nickname}와 오늘 뭐 하고 놀까요? 말하거나 써서 알려주세요.`,
+    createdAt: Date.now(),
+  };
+}
+
+function localUserMessage(text: string): ChatMessage {
+  return {
+    id: uid(),
+    role: "user",
+    kind: "text",
+    text,
+    createdAt: Date.now(),
+  };
+}
+
+function localNoriText(text: string): ChatMessage {
+  return {
+    id: uid(),
+    role: "nori",
+    kind: "text",
+    text,
+    createdAt: Date.now(),
+  };
 }
 
 export default function Chat() {
@@ -45,29 +73,15 @@ export default function Chat() {
   const stt = useSpeechToText({ lang: "ko-KR", continuous });
 
   useEffect(() => {
-    void (async () => {
-      const stored = await getVoiceContinuous();
-      setContinuous(stored);
-    })();
+    void getVoiceContinuous().then(setContinuous);
   }, []);
 
   useEffect(() => {
     void (async () => {
       try {
         const loaded = await loadRecentMessages(50);
-        if (loaded.length === 0 && child) {
-          setMessages([
-            {
-              id: "greet",
-              role: "nori",
-              kind: "text",
-              text: `안녕하세요! ${child.nickname}와 오늘 뭐 하고 놀까요? 말하거나 써서 알려주세요.`,
-              createdAt: Date.now(),
-            },
-          ]);
-        } else {
-          setMessages(loaded);
-        }
+        if (loaded.length === 0 && child) setMessages([greeting(child.nickname)]);
+        else setMessages(loaded);
       } catch (e) {
         setLoadError(friendlyError(e, "대화 내역을 불러오지 못했어요."));
       } finally {
@@ -94,6 +108,63 @@ export default function Chat() {
     await setVoiceContinuous(next);
   }, [continuous]);
 
+  const replaceTyping = useCallback(
+    (typingId: string, ...next: ChatMessage[]) => {
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== typingId),
+        ...next,
+      ]);
+    },
+    [],
+  );
+
+  const respondToPrompt = useCallback(
+    async (text: string, typingId: string) => {
+      // Client-side Red Flag — short-circuit before any network.
+      if (containsRedFlag(text)) {
+        const saved =
+          (await insertNoriText(RED_FLAG_MESSAGE).catch(() => null)) ??
+          localNoriText(RED_FLAG_MESSAGE);
+        replaceTyping(typingId, saved);
+        return;
+      }
+
+      try {
+        const res = await askForRecipe(text);
+        if (res.type === "red_flag") {
+          const saved =
+            (await insertNoriText(res.message).catch(() => null)) ??
+            localNoriText(res.message);
+          replaceTyping(typingId, saved);
+          return;
+        }
+
+        void insertRecipe(res.recipe).catch(() => null);
+        const intro =
+          (await insertNoriText("이런 놀이 어때요?").catch(() => null)) ??
+          localNoriText("이런 놀이 어때요?");
+        const card =
+          (await insertNoriRecipe(res.recipe).catch(() => null)) ??
+          ({
+            id: uid(),
+            role: "nori",
+            kind: "recipe",
+            recipe: res.recipe,
+            createdAt: Date.now(),
+          } satisfies ChatMessage);
+        replaceTyping(typingId, intro, card);
+      } catch (e) {
+        replaceTyping(
+          typingId,
+          localNoriText(
+            friendlyError(e, "잠깐 문제가 생겼어요. 다시 한 번 말씀해 주실래요?"),
+          ),
+        );
+      }
+    },
+    [replaceTyping],
+  );
+
   const send = useCallback(
     async (raw: string) => {
       const text = raw.trim();
@@ -101,113 +172,18 @@ export default function Chat() {
       setInput("");
       stt.reset();
 
-      let userMsg: ChatMessage;
-      try {
-        userMsg = await insertUserText(text);
-      } catch {
-        userMsg = {
-          id: uid(),
-          role: "user",
-          kind: "text",
-          text,
-          createdAt: Date.now(),
-        };
-      }
+      const userMsg =
+        (await insertUserText(text).catch(() => null)) ?? localUserMessage(text);
       const typingId = uid();
-      const typing: ChatMessage = {
-        id: typingId,
-        role: "nori",
-        kind: "typing",
-        createdAt: Date.now(),
-      };
-      setMessages((prev) => [...prev, userMsg, typing]);
+      setMessages((prev) => [
+        ...prev,
+        userMsg,
+        { id: typingId, role: "nori", kind: "typing", createdAt: Date.now() },
+      ]);
 
-      // Client-side Red Flag — short-circuit before hitting the server.
-      if (containsRedFlag(text)) {
-        try {
-          const saved = await insertNoriText(RED_FLAG_MESSAGE);
-          setMessages((prev) =>
-            prev.filter((m) => m.id !== typingId).concat([saved]),
-          );
-        } catch {
-          setMessages((prev) =>
-            prev
-              .filter((m) => m.id !== typingId)
-              .concat([
-                {
-                  id: uid(),
-                  role: "nori",
-                  kind: "text",
-                  text: RED_FLAG_MESSAGE,
-                  createdAt: Date.now(),
-                },
-              ]),
-          );
-        }
-        return;
-      }
-
-      try {
-        const res = await askForRecipe(text);
-        if (res.type === "red_flag") {
-          const saved = await insertNoriText(res.message).catch(() => null);
-          setMessages((prev) =>
-            prev.filter((m) => m.id !== typingId).concat([
-              saved ?? {
-                id: uid(),
-                role: "nori",
-                kind: "text",
-                text: res.message,
-                createdAt: Date.now(),
-              },
-            ]),
-          );
-          return;
-        }
-        void insertRecipe(res.recipe).catch(() => null);
-        const intro = await insertNoriText("이런 놀이 어때요?").catch(() => null);
-        const card = await insertNoriRecipe(res.recipe).catch(() => null);
-        setMessages((prev) =>
-          prev.filter((m) => m.id !== typingId).concat(
-            [
-              intro ?? {
-                id: uid(),
-                role: "nori",
-                kind: "text",
-                text: "이런 놀이 어때요?",
-                createdAt: Date.now(),
-              },
-              card ?? {
-                id: uid(),
-                role: "nori",
-                kind: "recipe",
-                recipe: res.recipe,
-                createdAt: Date.now(),
-              },
-            ] as ChatMessage[],
-          ),
-        );
-      } catch (e) {
-        const message = friendlyError(
-          e,
-          "잠깐 문제가 생겼어요. 다시 한 번 말씀해 주실래요?",
-        );
-        setMessages((prev) =>
-          prev
-            .filter((m) => m.id !== typingId)
-            .concat([
-              {
-                id: uid(),
-                role: "nori",
-                kind: "text",
-                text: message,
-                createdAt: Date.now(),
-              },
-            ]),
-        );
-      }
+      await respondToPrompt(text, typingId);
     },
-    [stt],
+    [respondToPrompt, stt],
   );
 
   const toggleMic = useCallback(async () => {
@@ -225,6 +201,8 @@ export default function Chat() {
         <Pressable
           onPress={() => router.back()}
           hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="뒤로"
           className="px-2 py-1"
         >
           <Text className="text-base text-slate-600">←</Text>
@@ -240,9 +218,7 @@ export default function Chat() {
         className="flex-1"
       >
         {initialLoading ? (
-          <View className="flex-1 items-center justify-center">
-            <ActivityIndicator />
-          </View>
+          <LoadingScreen />
         ) : (
           <FlatList
             ref={listRef}
@@ -288,9 +264,12 @@ export default function Chat() {
           </View>
         ) : null}
 
-        <View className="flex-row items-center gap-2 px-4 pt-1">
+        <View className="mt-1 flex-row items-center gap-2 px-4 pt-1">
           <Pressable
             onPress={toggleContinuous}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: continuous }}
+            accessibilityLabel="긴 말 듣기 모드"
             className={`flex-row items-center gap-1 rounded-full border px-3 py-1 ${
               continuous
                 ? "border-slate-900 bg-slate-900"
@@ -312,25 +291,26 @@ export default function Chat() {
           </Text>
         </View>
 
-        <View className="flex-row items-end gap-2 border-t border-slate-100 px-4 py-3 mt-1">
+        <View className="mt-1 flex-row items-end gap-2 border-t border-slate-100 px-4 py-3">
           <View className="flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2">
             <TextInput
               value={input}
               onChangeText={setInput}
-              placeholder={
-                isListening ? "듣고 있어요…" : "무슨 놀이가 좋을까요?"
-              }
+              placeholder={isListening ? "듣고 있어요…" : "무슨 놀이가 좋을까요?"}
               placeholderTextColor="#94a3b8"
               multiline
               className="max-h-28 text-base text-slate-900"
               style={{ minHeight: 36, textAlignVertical: "center" }}
               editable={!isListening}
+              accessibilityLabel="놀이 요청 입력"
             />
           </View>
 
           <Pressable
             onPress={toggleMic}
             disabled={isProcessing}
+            accessibilityRole="button"
+            accessibilityLabel={isListening ? "음성 인식 종료" : "음성 인식 시작"}
             className={`h-11 w-11 items-center justify-center rounded-full ${
               isListening ? "bg-red-500" : "border border-slate-200 bg-white"
             } active:opacity-80 disabled:opacity-50`}
@@ -347,6 +327,8 @@ export default function Chat() {
           <Pressable
             onPress={() => void send(input)}
             disabled={!canSend}
+            accessibilityRole="button"
+            accessibilityLabel="전송"
             className="h-11 w-11 items-center justify-center rounded-full bg-slate-900 active:opacity-80 disabled:opacity-40"
           >
             <Text className="text-lg text-white">→</Text>

@@ -80,6 +80,8 @@ export default function Home() {
         <View className="mt-10 items-center">
           <Pressable
             onPress={() => router.push("/(app)/chat")}
+            accessibilityRole="button"
+            accessibilityLabel="노리에게 놀이 물어보기"
             className="h-40 w-40 items-center justify-center rounded-full bg-slate-900 active:opacity-80"
           >
             <Text className="text-5xl">🎙️</Text>
@@ -106,6 +108,8 @@ export default function Home() {
                 <Pressable
                   key={r.id}
                   onPress={() => router.push(`/(app)/recipe/${r.id}`)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${r.title} 자세히 보기`}
                   className="rounded-2xl border border-slate-200 bg-white p-4 active:opacity-70"
                 >
                   <Text

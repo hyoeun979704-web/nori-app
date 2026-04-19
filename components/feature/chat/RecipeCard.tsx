@@ -48,10 +48,22 @@ export function RecipeCard({ recipe }: Props) {
           <Pressable
             onPress={onTogglePlay}
             disabled={recipe.steps.length === 0}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isSpeaking
+                ? "음성 일시정지"
+                : isPaused
+                  ? "음성 이어 읽기"
+                  : "놀이 순서 음성으로 듣기"
+            }
             className="flex-row items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 active:opacity-70 disabled:opacity-40"
           >
             <Text className="text-xs text-slate-700">
-              {isSpeaking ? "⏸ 일시정지" : isPaused ? "▶ 이어 읽기" : "🔊 읽어주기"}
+              {isSpeaking
+                ? "⏸ 일시정지"
+                : isPaused
+                  ? "▶ 이어 읽기"
+                  : "🔊 읽어주기"}
             </Text>
           </Pressable>
         </View>

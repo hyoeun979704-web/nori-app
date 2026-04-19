@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { RecipeCard } from "@/components/feature/chat/RecipeCard";
+import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { friendlyError } from "@/lib/error-messages";
 import { getRecipeById, type StoredRecipe } from "@/lib/recipes";
 
 export default function RecipeDetail() {
@@ -19,7 +21,7 @@ export default function RecipeDetail() {
         if (!r) setError("레시피를 찾을 수 없어요.");
         else setRecipe(r);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "레시피를 불러오지 못했어요.");
+        setError(friendlyError(e, "레시피를 불러오지 못했어요."));
       } finally {
         setLoading(false);
       }
@@ -32,18 +34,20 @@ export default function RecipeDetail() {
         <Pressable
           onPress={() => router.back()}
           hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="뒤로"
           className="px-2 py-1"
         >
           <Text className="text-base text-slate-600">←</Text>
         </Pressable>
-        <Text className="text-base font-semibold text-slate-900">놀이 레시피</Text>
+        <Text className="text-base font-semibold text-slate-900">
+          놀이 레시피
+        </Text>
         <View className="w-8" />
       </View>
 
       {loading ? (
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator />
-        </View>
+        <LoadingScreen />
       ) : error ? (
         <View className="flex-1 items-center justify-center px-6">
           <Text className="text-center text-sm text-red-600">{error}</Text>

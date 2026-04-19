@@ -5,11 +5,11 @@ import {
   Platform,
   Pressable,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
+import { FormField } from "@/components/ui/FormField";
 import { useAuth } from "@/lib/auth-context";
 import { friendlyError } from "@/lib/error-messages";
 
@@ -62,24 +62,18 @@ export default function ForgotPassword() {
           </Text>
 
           <View className="mt-10 gap-4">
-            <View>
-              <Text className="mb-1 text-sm text-slate-600">이메일</Text>
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                autoComplete="email"
-                keyboardType="email-address"
-                placeholder="you@example.com"
-                placeholderTextColor="#94a3b8"
-                accessibilityLabel="이메일 입력"
-                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900"
-              />
-            </View>
+            <FormField
+              label="이메일"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoComplete="email"
+              keyboardType="email-address"
+              placeholder="you@example.com"
+              accessibilityLabel="이메일 입력"
+              error={error}
+            />
 
-            {error ? (
-              <Text className="text-sm text-red-600">{error}</Text>
-            ) : null}
             {info ? (
               <Text className="text-sm text-emerald-700">{info}</Text>
             ) : null}
