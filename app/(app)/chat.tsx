@@ -22,6 +22,7 @@ import {
   loadRecentMessages,
 } from "@/lib/chat";
 import { askForRecipe } from "@/lib/recipe-api";
+import { insertRecipe } from "@/lib/recipes";
 import { containsRedFlag, RED_FLAG_MESSAGE } from "@/lib/red-flags";
 import { getVoiceContinuous, setVoiceContinuous } from "@/lib/settings";
 import type { ChatMessage } from "@/types/chat";
@@ -164,6 +165,7 @@ export default function Chat() {
           );
           return;
         }
+        void insertRecipe(res.recipe).catch(() => null);
         const intro = await insertNoriText("이런 놀이 어때요?").catch(() => null);
         const card = await insertNoriRecipe(res.recipe).catch(() => null);
         setMessages((prev) =>

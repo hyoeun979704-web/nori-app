@@ -1,13 +1,35 @@
+import { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useAuth } from "@/lib/auth-context";
 import { useChild } from "@/lib/child-context";
 import { formatAgeKo } from "@/lib/age";
+import { loadRecentRecipes, type StoredRecipe } from "@/lib/recipes";
 
 export default function Home() {
   const { signOut } = useAuth();
   const { child } = useChild();
+  const [recent, setRecent] = useState<StoredRecipe[]>([]);
+
+  const refreshRecipes = useCallback(async () => {
+    try {
+      const rows = await loadRecentRecipes(5);
+      setRecent(rows);
+    } catch {
+      // ignore — home keeps showing previous list
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshRecipes();
+  }, [refreshRecipes]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshRecipes();
+    }, [refreshRecipes]),
+  );
 
   if (!child) return null;
 
@@ -38,10 +60,7 @@ export default function Home() {
         {child.interests.length > 0 ? (
           <View className="mt-4 flex-row flex-wrap gap-2">
             {child.interests.map((it) => (
-              <View
-                key={it}
-                className="rounded-full bg-slate-100 px-3 py-1"
-              >
+              <View key={it} className="rounded-full bg-slate-100 px-3 py-1">
                 <Text className="text-xs text-slate-600">{it}</Text>
               </View>
             ))}
@@ -64,11 +83,34 @@ export default function Home() {
           <Text className="text-sm font-semibold text-slate-700">
             최근 놀이 레시피
           </Text>
-          <View className="mt-3 items-center rounded-2xl border border-dashed border-slate-200 py-10">
-            <Text className="text-sm text-slate-400">
-              아직 받은 레시피가 없어요.
-            </Text>
-          </View>
+
+          {recent.length === 0 ? (
+            <View className="mt-3 items-center rounded-2xl border border-dashed border-slate-200 py-10">
+              <Text className="text-sm text-slate-400">
+                아직 받은 레시피가 없어요.
+              </Text>
+            </View>
+          ) : (
+            <View className="mt-3 gap-2">
+              {recent.map((r) => (
+                <Pressable
+                  key={r.id}
+                  onPress={() => router.push(`/(app)/recipe/${r.id}`)}
+                  className="rounded-2xl border border-slate-200 bg-white p-4 active:opacity-70"
+                >
+                  <Text
+                    className="text-base font-semibold text-slate-900"
+                    numberOfLines={1}
+                  >
+                    {r.title}
+                  </Text>
+                  <Text className="mt-1 text-xs text-slate-500">
+                    {r.age_range} · 준비물 {r.materials.length}개
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
