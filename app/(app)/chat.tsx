@@ -15,16 +15,16 @@ import { MessageBubble } from "@/components/feature/chat/MessageBubble";
 import { RecipeCard } from "@/components/feature/chat/RecipeCard";
 import { useSpeechToText } from "@/hooks/useSpeechToText";
 import { useChild } from "@/lib/child-context";
-import { getDummyRecipe } from "@/lib/dummy-recipe";
+import {
+  insertNoriRecipe,
+  insertNoriText,
+  insertUserText,
+  loadRecentMessages,
+} from "@/lib/chat";
+import { askForRecipe } from "@/lib/recipe-api";
+import { containsRedFlag, RED_FLAG_MESSAGE } from "@/lib/red-flags";
+import { getVoiceContinuous, setVoiceContinuous } from "@/lib/settings";
 import type { ChatMessage } from "@/types/chat";
-
-const INITIAL_GREETING = (nickname: string): ChatMessage => ({
-  id: "greet",
-  role: "nori",
-  kind: "text",
-  text: `안녕하세요! ${nickname}와 오늘 뭐 하고 놀까요? 말하거나 써서 알려주세요.`,
-  createdAt: Date.now(),
-});
 
 function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -32,13 +32,49 @@ function uid(): string {
 
 export default function Chat() {
   const { child } = useChild();
-  const stt = useSpeechToText("ko-KR");
   const listRef = useRef<FlatList<ChatMessage>>(null);
 
-  const [messages, setMessages] = useState<ChatMessage[]>(() =>
-    child ? [INITIAL_GREETING(child.nickname)] : [],
-  );
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [continuous, setContinuous] = useState(false);
+  const stt = useSpeechToText({ lang: "ko-KR", continuous });
+
+  useEffect(() => {
+    void (async () => {
+      const stored = await getVoiceContinuous();
+      setContinuous(stored);
+    })();
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const loaded = await loadRecentMessages(50);
+        if (loaded.length === 0 && child) {
+          setMessages([
+            {
+              id: "greet",
+              role: "nori",
+              kind: "text",
+              text: `안녕하세요! ${child.nickname}와 오늘 뭐 하고 놀까요? 말하거나 써서 알려주세요.`,
+              createdAt: Date.now(),
+            },
+          ]);
+        } else {
+          setMessages(loaded);
+        }
+      } catch (e) {
+        setLoadError(
+          e instanceof Error ? e.message : "대화 내역을 불러오지 못했어요.",
+        );
+      } finally {
+        setInitialLoading(false);
+      }
+    })();
+  }, [child]);
 
   useEffect(() => {
     if (stt.transcript) setInput(stt.transcript);
@@ -52,17 +88,31 @@ export default function Chat() {
     return () => clearTimeout(id);
   }, [messages.length]);
 
+  const toggleContinuous = useCallback(async () => {
+    const next = !continuous;
+    setContinuous(next);
+    await setVoiceContinuous(next);
+  }, [continuous]);
+
   const send = useCallback(
     async (raw: string) => {
       const text = raw.trim();
       if (!text) return;
-      const userMsg: ChatMessage = {
-        id: uid(),
-        role: "user",
-        kind: "text",
-        text,
-        createdAt: Date.now(),
-      };
+      setInput("");
+      stt.reset();
+
+      let userMsg: ChatMessage;
+      try {
+        userMsg = await insertUserText(text);
+      } catch {
+        userMsg = {
+          id: uid(),
+          role: "user",
+          kind: "text",
+          text,
+          createdAt: Date.now(),
+        };
+      }
       const typingId = uid();
       const typing: ChatMessage = {
         id: typingId,
@@ -71,32 +121,76 @@ export default function Chat() {
         createdAt: Date.now(),
       };
       setMessages((prev) => [...prev, userMsg, typing]);
-      setInput("");
-      stt.reset();
+
+      // Client-side Red Flag — short-circuit before hitting the server.
+      if (containsRedFlag(text)) {
+        try {
+          const saved = await insertNoriText(RED_FLAG_MESSAGE);
+          setMessages((prev) =>
+            prev.filter((m) => m.id !== typingId).concat([saved]),
+          );
+        } catch {
+          setMessages((prev) =>
+            prev
+              .filter((m) => m.id !== typingId)
+              .concat([
+                {
+                  id: uid(),
+                  role: "nori",
+                  kind: "text",
+                  text: RED_FLAG_MESSAGE,
+                  createdAt: Date.now(),
+                },
+              ]),
+          );
+        }
+        return;
+      }
 
       try {
-        const recipe = await getDummyRecipe(text);
+        const res = await askForRecipe(text);
+        if (res.type === "red_flag") {
+          const saved = await insertNoriText(res.message).catch(() => null);
+          setMessages((prev) =>
+            prev.filter((m) => m.id !== typingId).concat([
+              saved ?? {
+                id: uid(),
+                role: "nori",
+                kind: "text",
+                text: res.message,
+                createdAt: Date.now(),
+              },
+            ]),
+          );
+          return;
+        }
+        const intro = await insertNoriText("이런 놀이 어때요?").catch(() => null);
+        const card = await insertNoriRecipe(res.recipe).catch(() => null);
         setMessages((prev) =>
-          prev
-            .filter((m) => m.id !== typingId)
-            .concat([
-              {
+          prev.filter((m) => m.id !== typingId).concat(
+            [
+              intro ?? {
                 id: uid(),
                 role: "nori",
                 kind: "text",
                 text: "이런 놀이 어때요?",
                 createdAt: Date.now(),
               },
-              {
+              card ?? {
                 id: uid(),
                 role: "nori",
                 kind: "recipe",
-                recipe,
+                recipe: res.recipe,
                 createdAt: Date.now(),
               },
-            ]),
+            ] as ChatMessage[],
+          ),
         );
-      } catch {
+      } catch (e) {
+        const message =
+          e instanceof Error
+            ? e.message
+            : "잠깐 문제가 생겼어요. 다시 한 번 말씀해 주실래요?";
         setMessages((prev) =>
           prev
             .filter((m) => m.id !== typingId)
@@ -105,7 +199,7 @@ export default function Chat() {
                 id: uid(),
                 role: "nori",
                 kind: "text",
-                text: "잠깐 문제가 생겼어요. 다시 한 번 말씀해 주실래요?",
+                text: message,
                 createdAt: Date.now(),
               },
             ]),
@@ -126,7 +220,7 @@ export default function Chat() {
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <View className="flex-row items-center justify-between px-4 py-3 border-b border-slate-100">
+      <View className="flex-row items-center justify-between border-b border-slate-100 px-4 py-3">
         <Pressable
           onPress={() => router.back()}
           hitSlop={10}
@@ -143,47 +237,81 @@ export default function Chat() {
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         className="flex-1"
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
-        <FlatList
-          ref={listRef}
-          data={messages}
-          keyExtractor={(m) => m.id}
-          contentContainerClassName="px-4 py-4"
-          renderItem={({ item }) => {
-            if (item.kind === "typing") {
-              return (
-                <MessageBubble role="nori">
-                  <View className="flex-row items-center gap-2">
-                    <ActivityIndicator size="small" />
-                    <Text className="text-sm text-slate-500">
-                      노리가 생각하고 있어요…
-                    </Text>
-                  </View>
-                </MessageBubble>
-              );
+        {initialLoading ? (
+          <View className="flex-1 items-center justify-center">
+            <ActivityIndicator />
+          </View>
+        ) : (
+          <FlatList
+            ref={listRef}
+            data={messages}
+            keyExtractor={(m) => m.id}
+            contentContainerClassName="px-4 py-4"
+            renderItem={({ item }) => {
+              if (item.kind === "typing") {
+                return (
+                  <MessageBubble role="nori">
+                    <View className="flex-row items-center gap-2">
+                      <ActivityIndicator size="small" />
+                      <Text className="text-sm text-slate-500">
+                        노리가 생각하고 있어요…
+                      </Text>
+                    </View>
+                  </MessageBubble>
+                );
+              }
+              if (item.kind === "recipe") {
+                return (
+                  <MessageBubble role="nori">
+                    <RecipeCard recipe={item.recipe} />
+                  </MessageBubble>
+                );
+              }
+              return <MessageBubble role={item.role}>{item.text}</MessageBubble>;
+            }}
+            onContentSizeChange={() =>
+              listRef.current?.scrollToEnd({ animated: true })
             }
-            if (item.kind === "recipe") {
-              return (
-                <MessageBubble role="nori">
-                  <RecipeCard recipe={item.recipe} />
-                </MessageBubble>
-              );
-            }
-            return <MessageBubble role={item.role}>{item.text}</MessageBubble>;
-          }}
-          onContentSizeChange={() =>
-            listRef.current?.scrollToEnd({ animated: true })
-          }
-        />
+          />
+        )}
 
+        {loadError ? (
+          <View className="mx-4 mb-2 rounded-xl border border-red-200 bg-red-50 p-3">
+            <Text className="text-sm text-red-700">{loadError}</Text>
+          </View>
+        ) : null}
         {stt.error ? (
           <View className="mx-4 mb-2 rounded-xl border border-red-200 bg-red-50 p-3">
             <Text className="text-sm text-red-700">{stt.error}</Text>
           </View>
         ) : null}
 
-        <View className="flex-row items-end gap-2 border-t border-slate-100 px-4 py-3">
+        <View className="flex-row items-center gap-2 px-4 pt-1">
+          <Pressable
+            onPress={toggleContinuous}
+            className={`flex-row items-center gap-1 rounded-full border px-3 py-1 ${
+              continuous
+                ? "border-slate-900 bg-slate-900"
+                : "border-slate-200 bg-white"
+            }`}
+          >
+            <Text
+              className={`text-xs ${
+                continuous ? "text-white" : "text-slate-600"
+              }`}
+            >
+              {continuous ? "🐢 긴 말 듣기" : "🐇 짧게 듣기"}
+            </Text>
+          </Pressable>
+          <Text className="text-[11px] text-slate-400">
+            {continuous
+              ? "노리가 계속 듣고 있어요. 다 말하면 탭해서 끝내요."
+              : "한 문장씩 듣고 자동으로 끝나요."}
+          </Text>
+        </View>
+
+        <View className="flex-row items-end gap-2 border-t border-slate-100 px-4 py-3 mt-1">
           <View className="flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2">
             <TextInput
               value={input}
@@ -203,13 +331,13 @@ export default function Chat() {
             onPress={toggleMic}
             disabled={isProcessing}
             className={`h-11 w-11 items-center justify-center rounded-full ${
-              isListening
-                ? "bg-red-500"
-                : "border border-slate-200 bg-white"
+              isListening ? "bg-red-500" : "border border-slate-200 bg-white"
             } active:opacity-80 disabled:opacity-50`}
           >
             <Text
-              className={`text-xl ${isListening ? "text-white" : "text-slate-700"}`}
+              className={`text-xl ${
+                isListening ? "text-white" : "text-slate-700"
+              }`}
             >
               🎙️
             </Text>

@@ -12,6 +12,11 @@ export type SttStatus =
   | "error"
   | "unsupported";
 
+export type UseSpeechToTextOptions = {
+  lang?: string;
+  continuous?: boolean;
+};
+
 export type UseSpeechToText = {
   status: SttStatus;
   transcript: string;
@@ -21,7 +26,10 @@ export type UseSpeechToText = {
   reset: () => void;
 };
 
-export function useSpeechToText(lang = "ko-KR"): UseSpeechToText {
+export function useSpeechToText(
+  options: UseSpeechToTextOptions = {},
+): UseSpeechToText {
+  const { lang = "ko-KR", continuous = false } = options;
   const [status, setStatus] = useState<SttStatus>("idle");
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +45,9 @@ export function useSpeechToText(lang = "ko-KR"): UseSpeechToText {
   });
 
   useSpeechRecognitionEvent("end", () => {
-    setStatus((prev) => (prev === "error" || prev === "unsupported" ? prev : "idle"));
+    setStatus((prev) =>
+      prev === "error" || prev === "unsupported" ? prev : "idle",
+    );
   });
 
   const start = useCallback(async () => {
@@ -55,7 +65,7 @@ export function useSpeechToText(lang = "ko-KR"): UseSpeechToText {
       ExpoSpeechRecognitionModule.start({
         lang,
         interimResults: true,
-        continuous: false,
+        continuous,
         requiresOnDeviceRecognition: false,
         addsPunctuation: true,
       });
@@ -69,7 +79,7 @@ export function useSpeechToText(lang = "ko-KR"): UseSpeechToText {
       );
       setStatus("unsupported");
     }
-  }, [lang]);
+  }, [lang, continuous]);
 
   const stop = useCallback(() => {
     try {
