@@ -18,7 +18,17 @@
         "backgroundColor": "#ffffff"
       }
     },
-    "plugins": ["expo-router"],
+    "plugins": [
+      "expo-router",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "노리가 아이에게 딱 맞는 놀이를 추천하기 위해 마이크를 사용해요.",
+          "speechRecognitionPermission": "말씀하신 내용을 놀이 추천에만 사용해요. 저장·전송되지 않습니다.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ]
+    ],
     "experiments": {
       "typedRoutes": true
     }

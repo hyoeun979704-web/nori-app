@@ -1,5 +1,6 @@
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { router } from "expo-router";
 import { useAuth } from "@/lib/auth-context";
 import { useChild } from "@/lib/child-context";
 import { formatAgeKo } from "@/lib/age";
@@ -48,11 +49,14 @@ export default function Home() {
         ) : null}
 
         <View className="mt-10 items-center">
-          <View className="h-40 w-40 items-center justify-center rounded-full bg-slate-100">
+          <Pressable
+            onPress={() => router.push("/(app)/chat")}
+            className="h-40 w-40 items-center justify-center rounded-full bg-slate-900 active:opacity-80"
+          >
             <Text className="text-5xl">🎙️</Text>
-          </View>
+          </Pressable>
           <Text className="mt-6 text-center text-base text-slate-500">
-            곧 이 버튼으로 음성 놀이 요청을{"\n"}보낼 수 있게 됩니다. (Phase 3)
+            이 버튼을 눌러{"\n"}노리에게 놀이를 물어보세요.
           </Text>
         </View>
 
