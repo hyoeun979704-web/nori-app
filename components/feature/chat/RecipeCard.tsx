@@ -14,7 +14,6 @@ export function RecipeCard({ recipe }: Props) {
   const isSpeaking = tts.status === "speaking";
   const isPaused = tts.status === "paused";
 
-  const allMaterials = recipe.materials.join(" ");
   const youtubeQuery = `${recipe.title} 아이 놀이`;
 
   const onTogglePlay = () => {
@@ -88,8 +87,10 @@ export function RecipeCard({ recipe }: Props) {
 
       <View className="mt-4 flex-row gap-2">
         <Pressable
-          onPress={() => void openCoupangSearch(allMaterials)}
+          onPress={() => void openCoupangSearch(recipe.materials)}
           disabled={recipe.materials.length === 0}
+          accessibilityRole="button"
+          accessibilityLabel="쿠팡에서 준비물 검색"
           className="flex-1 items-center rounded-xl border border-slate-200 bg-white py-3 active:opacity-70 disabled:opacity-40"
         >
           <Text className="text-sm font-semibold text-slate-700">
@@ -98,6 +99,8 @@ export function RecipeCard({ recipe }: Props) {
         </Pressable>
         <Pressable
           onPress={() => void openYouTubeSearch(youtubeQuery)}
+          accessibilityRole="button"
+          accessibilityLabel="YouTube에서 놀이 영상 검색"
           className="flex-1 items-center rounded-xl border border-slate-200 bg-white py-3 active:opacity-70"
         >
           <Text className="text-sm font-semibold text-slate-700">

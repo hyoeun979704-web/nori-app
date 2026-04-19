@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useFocusEffect } from "expo-router";
@@ -21,10 +21,8 @@ export default function Home() {
     }
   }, []);
 
-  useEffect(() => {
-    void refreshRecipes();
-  }, [refreshRecipes]);
-
+  // useFocusEffect covers both initial mount and every subsequent focus,
+  // so an extra useEffect would double-fetch on the first render.
   useFocusEffect(
     useCallback(() => {
       void refreshRecipes();
@@ -49,12 +47,24 @@ export default function Home() {
               {formatAgeKo(child.birth_date)}
             </Text>
           </View>
-          <Pressable
-            onPress={signOut}
-            className="rounded-full border border-slate-200 px-3 py-1.5 active:opacity-70"
-          >
-            <Text className="text-xs text-slate-600">로그아웃</Text>
-          </Pressable>
+          <View className="flex-row gap-1.5">
+            <Pressable
+              onPress={() => router.push("/(app)/profile")}
+              accessibilityRole="button"
+              accessibilityLabel="프로필 관리"
+              className="rounded-full border border-slate-200 px-3 py-1.5 active:opacity-70"
+            >
+              <Text className="text-xs text-slate-600">⚙️ 프로필</Text>
+            </Pressable>
+            <Pressable
+              onPress={signOut}
+              accessibilityRole="button"
+              accessibilityLabel="로그아웃"
+              className="rounded-full border border-slate-200 px-3 py-1.5 active:opacity-70"
+            >
+              <Text className="text-xs text-slate-600">로그아웃</Text>
+            </Pressable>
+          </View>
         </View>
 
         {child.interests.length > 0 ? (

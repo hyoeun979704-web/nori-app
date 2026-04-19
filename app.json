@@ -7,7 +7,7 @@
     "orientation": "portrait",
     "platforms": ["ios", "android"],
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.nori.app"

@@ -1,47 +1,78 @@
 // Gemini-backed play-recipe Edge Function.
 //
-// Flow:
-//   1. Authenticate user via incoming JWT (fails closed if missing).
-//   2. Server-side Red Flag match — if triggered, never call Gemini; return
-//      the hardcoded consultation message. This mirrors lib/red-flags.ts on
-//      the client; both lists MUST stay in sync.
-//   3. Fetch the user's `children` + `child_surveys` rows (RLS-scoped via
-//      the user's JWT) and build an AI-only context from age/interests and
-//      the private survey (allergies, sensitivities, notes).
-//   4. Pull internal dev_milestones + dev_play_activities rows for the
-//      nearest age checkpoint and inject them as inspiration hints.
-//   5. Call Gemini with a strict responseSchema so the output conforms to
-//      { title, age_range, materials[], steps[], tip, safety_note }.
-//   6. Validate the shape before returning. Any deviation → 502.
+// Pipeline
+// --------
+// 1. Authenticate user via incoming JWT (fail closed if absent).
+// 2. Per-user rate limit — check `recipe_call_log` for the last minute.
+// 3. Server-side Red Flag match (regex rules mirrored from
+//    `lib/red-flags.ts`). On match return the hardcoded consultation
+//    message and never call Gemini.
+// 4. Fetch the user's `children` + `child_surveys` (RLS-scoped via the
+//    user's JWT), build a private prompt context from age/interests and
+//    the surveyed allergies/sensitivities/notes.
+// 5. Pull internal `dev_milestones` + `dev_play_activities` rows for the
+//    nearest age checkpoint as inspiration hints.
+// 6. Call Gemini with a strict responseSchema so the output conforms to
+//    { title, age_range, materials[], steps[], tip, safety_note }.
+// 7. Validate the shape (including non-empty arrays) before returning.
+//    Any deviation → 502.
 //
 // Env vars (supabase secrets):
-//   GEMINI_API_KEY — required. NEVER exposed to the client.
+//   GEMINI_API_KEY      — required. NEVER exposed to the client.
+//   GEMINI_MODEL        — optional. Defaults to "gemini-2.5-flash".
 //
 // Deploy:
-//   supabase functions deploy recipe --no-verify-jwt=false
+//   supabase functions deploy recipe
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 import { corsHeaders } from "../_shared/cors.ts";
 
-// Keep in sync with lib/red-flags.ts
-const RED_FLAG_PATTERNS: readonly string[] = [
-  "경련", "발작", "의식이 없", "숨을 안 쉬", "숨을 못 쉬", "호흡이 이상",
-  "39도", "40도", "고열", "심하게 다쳤", "머리를 부딪", "피가 멈추지 않",
-  "삼켰어요", "이물질", "중독", "화상",
-  "말을 한마디도", "말을 전혀", "말이 너무 늦", "걷지를 못", "걷지 못해",
-  "눈을 마주치지 않", "이름을 불러도 돌아보지 않", "반응이 없어요",
-  "발달이 늦", "발달 지연", "자폐", "자폐 스펙트럼", "ADHD", "주의력결핍",
+// ---------------------------------------------------------------------------
+// Red Flag rules — MUST stay byte-for-byte identical with lib/red-flags.ts.
+// ---------------------------------------------------------------------------
+type RedFlagRule = { id: string; pattern: string; description: string };
+
+const RED_FLAG_RULES: readonly RedFlagRule[] = [
+  { id: "seizure", pattern: "경련|발작", description: "경련·발작" },
+  { id: "loss_of_consciousness", pattern: "의식(\\s*이|\\s*을)?\\s*(없|잃|안\\s*돌아)", description: "의식 이상" },
+  { id: "breathing", pattern: "숨(\\s*을|\\s*이)?\\s*(안|못)\\s*(쉬|쉽)", description: "호흡 곤란" },
+  { id: "high_fever", pattern: "(열|체온)\\s*(이|을)?\\s*(39|40|41)\\s*도?", description: "고열" },
+  { id: "bleeding", pattern: "피(\\s*가|\\s*를)?\\s*(멈추지|안\\s*멈)", description: "출혈 지속" },
+  { id: "ingestion", pattern: "(삼켰|삼키었|이물질\\s*을?\\s*삼)", description: "이물질 삼킴" },
+  { id: "serious_injury", pattern: "심하게\\s*다(쳤|침|쳐)", description: "큰 부상" },
+  { id: "head_injury", pattern: "머리(\\s*를|\\s*가)?\\s*(부딪|다쳤|깨졌)", description: "머리 부상" },
+  { id: "burn", pattern: "화상(\\s*을|\\s*이)?\\s*(입|있|심)", description: "화상" },
+  { id: "poisoning", pattern: "중독(\\s*이|\\s*을)?\\s*(된|되었|의심)", description: "중독 의심" },
+  { id: "no_speech", pattern: "말(\\s*을|\\s*이)?\\s*(한\\s*마디도|전혀|하나도)\\s*(못|안)", description: "언어 지연" },
+  { id: "no_walking", pattern: "걷지(\\s*를)?\\s*(못|않)(하|아|네)", description: "걷기 지연" },
+  { id: "no_eye_contact", pattern: "눈(\\s*을|\\s*이)?\\s*(마주치지|맞추지)\\s*(않|못|안)", description: "눈맞춤 안 됨" },
+  { id: "no_name_response", pattern: "이름(\\s*을)?\\s*불러도\\s*(돌아보지|반응하지|쳐다보지)\\s*(않|못|안)", description: "호명 반응 없음" },
+  { id: "developmental_delay", pattern: "발달(\\s*이|\\s*을)?\\s*(늦|지연|문제)", description: "발달 우려" },
+  { id: "autism_concern", pattern: "자폐(\\s*스펙트럼)?(\\s*인가|\\s*같|\\s*아닐까|\\s*진단)", description: "자폐 우려" },
+  { id: "adhd_concern", pattern: "(adhd|주의력\\s*결핍)(\\s*인가|\\s*같|\\s*아닐까|\\s*진단)?", description: "ADHD 우려" },
 ];
+
 const RED_FLAG_MESSAGE =
   "말씀해 주신 내용은 전문가의 상담이 도움이 될 수 있는 부분이에요. " +
   "가까운 소아청소년과, 혹은 지역 육아종합지원센터·발달지원센터에서 전문가를 먼저 만나 보시길 권해요. " +
   "노리는 놀이 추천을 돕는 서비스로, 의학적 판단이나 진단을 대신할 수 없어요.";
 
-function containsRedFlag(text: string): boolean {
-  const lower = text.toLowerCase();
-  return RED_FLAG_PATTERNS.some((p) => lower.includes(p.toLowerCase()));
+function matchRedFlag(text: string): RedFlagRule | null {
+  for (const rule of RED_FLAG_RULES) {
+    if (new RegExp(rule.pattern, "iu").test(text)) return rule;
+  }
+  return null;
 }
 
+// ---------------------------------------------------------------------------
+// Rate limiting (in-database, per-user, rolling 60s window)
+// ---------------------------------------------------------------------------
+const RATE_LIMIT_WINDOW_SEC = 60;
+const RATE_LIMIT_MAX = 10;
+
+// ---------------------------------------------------------------------------
+// Age checkpoint math
+// ---------------------------------------------------------------------------
 const CHECKPOINTS = [2, 4, 6, 9, 12, 15, 18, 24, 30, 36, 48, 60, 72, 84] as const;
 
 function monthsBetween(birth: Date, now: Date): number {
@@ -65,6 +96,9 @@ function nearestCheckpoint(ageMonths: number): number {
   return best;
 }
 
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 type Child = {
   id: string;
   nickname: string;
@@ -97,12 +131,14 @@ function isValidRecipe(value: unknown): value is Recipe {
   if (!value || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
   return (
-    typeof v.title === "string" &&
-    typeof v.age_range === "string" &&
+    typeof v.title === "string" && v.title.trim().length > 0 &&
+    typeof v.age_range === "string" && v.age_range.trim().length > 0 &&
     Array.isArray(v.materials) &&
-    v.materials.every((m) => typeof m === "string") &&
+    v.materials.length >= 1 &&
+    v.materials.every((m) => typeof m === "string" && m.trim().length > 0) &&
     Array.isArray(v.steps) &&
-    v.steps.every((s) => typeof s === "string") &&
+    v.steps.length >= 1 &&
+    v.steps.every((s) => typeof s === "string" && s.trim().length > 0) &&
     typeof v.tip === "string" &&
     typeof v.safety_note === "string"
   );
@@ -119,7 +155,7 @@ const RECIPE_SCHEMA = {
     safety_note: { type: "string" },
   },
   required: ["title", "age_range", "materials", "steps", "tip", "safety_note"],
-} as const;
+};
 
 const SYSTEM_INSTRUCTION = `당신은 영유아(0~7세) 부모를 돕는 놀이 가이드 "노리"입니다.
 다음 규칙을 절대 어기지 마세요.
@@ -132,7 +168,7 @@ const SYSTEM_INSTRUCTION = `당신은 영유아(0~7세) 부모를 돕는 놀이 
 6. age_range는 "N~M개월" 형식으로만 쓰세요 (예: "24~36개월").
 7. safety_note는 한 문장으로 명확하고 짧게. 예: "작은 부품이 있다면 삼키지 않도록 지켜봐 주세요."
 8. 반드시 JSON 스키마 { title, age_range, materials[], steps[], tip, safety_note }로만 답하세요.
-   steps는 3~6개, materials는 집에서 쉽게 구할 수 있는 것들로.
+   steps는 3~6개, materials는 집에서 쉽게 구할 수 있는 것들로, 최소 1개.
 9. 쿠팡·YouTube·브랜드명을 넣지 마세요 (앱이 별도로 링크를 붙여요).`;
 
 function buildUserMessage(args: {
@@ -174,17 +210,13 @@ function buildUserMessage(args: {
   if (args.milestones.length > 0) {
     parts.push("");
     parts.push("이 연령대 아이들이 보이는 행동 (참고용 · 비교·진단 표현 금지):");
-    args.milestones.forEach((m) =>
-      parts.push(`- [${m.domain}] ${m.description_ko}`),
-    );
+    args.milestones.forEach((m) => parts.push(`- [${m.domain}] ${m.description_ko}`));
   }
 
   if (args.activities.length > 0) {
     parts.push("");
     parts.push("같은 연령대를 위한 공공기관 권장 놀이 (영감 참고용, 그대로 베끼지 말 것):");
-    args.activities.forEach((a) =>
-      parts.push(`- ${a.title_ko}: ${a.summary_ko}`),
-    );
+    args.activities.forEach((a) => parts.push(`- ${a.title_ko}: ${a.summary_ko}`));
   }
 
   parts.push("");
@@ -197,6 +229,30 @@ function json(payload: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+// Never log a raw prompt or model response — both may contain child PII
+// (allergies, medical notes, nickname). A short hash lets us correlate logs
+// without persisting content.
+async function contentHash(input: string): Promise<string> {
+  const bytes = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const arr = Array.from(new Uint8Array(digest));
+  return arr.slice(0, 6).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -213,6 +269,7 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
   const geminiKey = Deno.env.get("GEMINI_API_KEY");
+  const geminiModel = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
   if (!supabaseUrl || !supabaseAnonKey || !geminiKey) {
     console.error("missing required env var");
     return json({ error: "server misconfigured" }, 500);
@@ -228,9 +285,42 @@ Deno.serve(async (req) => {
   } = await supabase.auth.getUser();
   if (userErr || !user) return json({ error: "unauthorized" }, 401);
 
+  // --- Rate limit ---------------------------------------------------------
+  const windowStart = new Date(
+    Date.now() - RATE_LIMIT_WINDOW_SEC * 1000,
+  ).toISOString();
+  const { count: recentCount, error: countErr } = await supabase
+    .from("recipe_call_log")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .gte("created_at", windowStart);
+  if (countErr) console.error("rate limit count failed", countErr.message);
+  if ((recentCount ?? 0) >= RATE_LIMIT_MAX) {
+    return json(
+      {
+        error: "rate_limited",
+        message:
+          "짧은 시간에 너무 많이 요청했어요. 잠시 후 다시 시도해 주세요.",
+      },
+      429,
+    );
+  }
+
+  // Log this call before expensive work so parallel calls are counted.
+  await supabase.from("recipe_call_log").insert({ user_id: user.id });
+  // Best-effort cleanup of old rows.
+  void supabase
+    .from("recipe_call_log")
+    .delete()
+    .eq("user_id", user.id)
+    .lt("created_at", new Date(Date.now() - 3600 * 1000).toISOString());
+
+  // --- Parse body ---------------------------------------------------------
   let body: { prompt?: unknown };
   try {
-    body = await req.json();
+    const raw = await req.text();
+    if (raw.length > 4096) return json({ error: "body too large" }, 413);
+    body = raw ? JSON.parse(raw) : {};
   } catch {
     return json({ error: "invalid json body" }, 400);
   }
@@ -238,11 +328,17 @@ Deno.serve(async (req) => {
   if (!prompt) return json({ error: "empty prompt" }, 400);
   if (prompt.length > 500) return json({ error: "prompt too long" }, 400);
 
-  if (containsRedFlag(prompt)) {
+  // --- Red Flag -----------------------------------------------------------
+  const redFlag = matchRedFlag(prompt);
+  if (redFlag) {
+    console.log("red_flag", {
+      user: user.id.slice(0, 8),
+      rule: redFlag.id,
+    });
     return json({ type: "red_flag", message: RED_FLAG_MESSAGE });
   }
 
-  // RLS ensures users only see their own child
+  // --- Gather context via RLS-scoped queries -----------------------------
   const { data: childRow } = await supabase
     .from("children")
     .select("id, nickname, birth_date, interests")
@@ -282,57 +378,68 @@ Deno.serve(async (req) => {
   }
 
   const userMessage = buildUserMessage({ prompt, child, survey, milestones, activities });
+  const promptDigest = await contentHash(userMessage);
 
+  // --- Call Gemini with timeout ------------------------------------------
   const geminiUrl =
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" +
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent?key=` +
     encodeURIComponent(geminiKey);
 
   let geminiRes: Response;
   try {
-    geminiRes = await fetch(geminiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
-        contents: [{ role: "user", parts: [{ text: userMessage }] }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: RECIPE_SCHEMA,
-          temperature: 0.8,
-          maxOutputTokens: 1024,
-        },
-      }),
-    });
+    geminiRes = await fetchWithTimeout(
+      geminiUrl,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+          contents: [{ role: "user", parts: [{ text: userMessage }] }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: RECIPE_SCHEMA,
+            temperature: 0.8,
+            maxOutputTokens: 1024,
+          },
+        }),
+      },
+      15_000,
+    );
   } catch (e) {
-    console.error("gemini fetch failed", e);
-    return json({ error: "upstream unavailable" }, 502);
+    console.error("gemini fetch failed", {
+      digest: promptDigest,
+      reason: e instanceof Error ? e.name : "unknown",
+    });
+    return json({ error: "upstream_unavailable" }, 504);
   }
 
   if (!geminiRes.ok) {
-    const body = await geminiRes.text().catch(() => "");
-    console.error("gemini non-200", geminiRes.status, body);
-    return json({ error: "upstream error" }, 502);
+    console.error("gemini non-200", {
+      digest: promptDigest,
+      status: geminiRes.status,
+    });
+    return json({ error: "upstream_error" }, 502);
   }
 
-  const geminiData = await geminiRes.json().catch(() => null) as
+  const geminiData = (await geminiRes.json().catch(() => null)) as
     | { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }
     | null;
   const text = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) {
-    console.error("gemini empty response", JSON.stringify(geminiData));
-    return json({ error: "empty response" }, 502);
+    console.error("gemini empty response", { digest: promptDigest });
+    return json({ error: "empty_response" }, 502);
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    console.error("gemini non-json", text.slice(0, 200));
-    return json({ error: "invalid json from model" }, 502);
+    console.error("gemini non-json", { digest: promptDigest });
+    return json({ error: "invalid_json_from_model" }, 502);
   }
   if (!isValidRecipe(parsed)) {
-    console.error("gemini shape mismatch", JSON.stringify(parsed).slice(0, 400));
-    return json({ error: "invalid recipe shape" }, 502);
+    console.error("gemini shape mismatch", { digest: promptDigest });
+    return json({ error: "invalid_recipe_shape" }, 502);
   }
 
   return json({ type: "recipe", recipe: parsed });

@@ -147,6 +147,8 @@ export default function Onboarding() {
 
               <Pressable
                 onPress={() => setShowPicker(true)}
+                accessibilityRole="button"
+                accessibilityLabel="생년월일 선택"
                 className="mt-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 active:opacity-80"
               >
                 <Text
@@ -158,18 +160,29 @@ export default function Onboarding() {
                 </Text>
               </Pressable>
 
-              {(showPicker || Platform.OS === "ios") && (
+              {showPicker && (
                 <View className="mt-4">
                   <DateTimePicker
                     value={birthDate ?? new Date()}
                     mode="date"
-                    display={Platform.OS === "ios" ? "spinner" : "default"}
+                    display={Platform.OS === "ios" ? "inline" : "default"}
                     maximumDate={new Date()}
-                    onChange={(_, selected) => {
+                    onChange={(event, selected) => {
                       if (Platform.OS !== "ios") setShowPicker(false);
+                      if (event.type === "dismissed") return;
                       if (selected) setBirthDate(selected);
                     }}
                   />
+                  {Platform.OS === "ios" ? (
+                    <Pressable
+                      onPress={() => setShowPicker(false)}
+                      className="mt-2 items-center rounded-xl border border-slate-200 bg-white py-3 active:opacity-70"
+                    >
+                      <Text className="text-sm font-semibold text-slate-700">
+                        확인
+                      </Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               )}
             </View>
