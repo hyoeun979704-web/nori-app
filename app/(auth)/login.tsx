@@ -81,6 +81,8 @@ export default function Login() {
             <Pressable
               onPress={onSubmit}
               disabled={submitting}
+              accessibilityRole="button"
+              accessibilityLabel="로그인"
               className="mt-2 items-center rounded-xl bg-slate-900 py-4 active:opacity-80 disabled:opacity-50"
             >
               {submitting ? (
@@ -93,7 +95,16 @@ export default function Login() {
             </Pressable>
           </View>
 
-          <View className="mt-8 flex-row justify-center">
+          <View className="mt-6 items-center">
+            <Link
+              href="/(auth)/forgot-password"
+              className="text-sm text-slate-500"
+            >
+              비밀번호를 잊으셨나요?
+            </Link>
+          </View>
+
+          <View className="mt-6 flex-row justify-center">
             <Text className="text-slate-500">계정이 없으신가요? </Text>
             <Link href="/(auth)/signup" className="font-semibold text-slate-900">
               가입하기

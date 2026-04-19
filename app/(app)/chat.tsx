@@ -24,6 +24,7 @@ import {
 import { askForRecipe } from "@/lib/recipe-api";
 import { insertRecipe } from "@/lib/recipes";
 import { containsRedFlag, RED_FLAG_MESSAGE } from "@/lib/red-flags";
+import { friendlyError } from "@/lib/error-messages";
 import { getVoiceContinuous, setVoiceContinuous } from "@/lib/settings";
 import type { ChatMessage } from "@/types/chat";
 
@@ -68,9 +69,7 @@ export default function Chat() {
           setMessages(loaded);
         }
       } catch (e) {
-        setLoadError(
-          e instanceof Error ? e.message : "대화 내역을 불러오지 못했어요.",
-        );
+        setLoadError(friendlyError(e, "대화 내역을 불러오지 못했어요."));
       } finally {
         setInitialLoading(false);
       }
@@ -189,10 +188,10 @@ export default function Chat() {
           ),
         );
       } catch (e) {
-        const message =
-          e instanceof Error
-            ? e.message
-            : "잠깐 문제가 생겼어요. 다시 한 번 말씀해 주실래요?";
+        const message = friendlyError(
+          e,
+          "잠깐 문제가 생겼어요. 다시 한 번 말씀해 주실래요?",
+        );
         setMessages((prev) =>
           prev
             .filter((m) => m.id !== typingId)
