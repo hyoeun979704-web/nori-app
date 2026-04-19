@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "노리",
+    "slug": "nori",
+    "version": "0.1.0",
+    "scheme": "nori",
+    "orientation": "portrait",
+    "platforms": ["ios", "android"],
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.nori.app"
+    },
+    "android": {
+      "package": "com.nori.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
