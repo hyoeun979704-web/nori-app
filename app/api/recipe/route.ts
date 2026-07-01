@@ -41,8 +41,12 @@ const SYSTEM = `너는 0~5세 영유아 놀이 전문가이자 아동 안전 전
 - 시간·장소(밤, 외출 중, 차 안, 좁은 방 등)가 언급되면 그 제약에 맞춰라.
 - 말한 재료가 그 연령에 위험하면, 짧게 위험을 알리고 안전한 대체 놀이를 제안하라.
 
+[사진이 있으면]
+- 사진 속에 보이는 물건·가구·공간을 파악해서, 그것들로 할 수 있는 놀이를 만들어라. 사진에 없는 특별한 준비물을 요구하지 마라.
+
 [형식]
 - 준비물은 부모가 말한 물건 + 어느 집에나 있는 흔한 물건을 전제로.
+- 아이의 관심사가 주어지면 놀이 주제에 자연스럽게 녹여라.
 - 순서(steps)는 3단계, 짧고 명확하게.
 - 진부하지 않게, 부모가 "오 이거 해볼까" 싶게.
 - 한국어로, 따뜻하고 다정한 말투로.`
@@ -81,6 +85,10 @@ export async function POST(req: Request) {
   // 실시간 상태 프리셋 (선택) — FunDad식 빠른 상태 지정
   const mood = body.mood as 'calm' | 'active' | undefined
   const mess = body.mess as 'clean' | 'messy' | undefined
+  // 프로필 관심사
+  const interests = (body.interests as string[] | undefined) ?? []
+  // 카메라(비전) 입력 — dataURL
+  const imageBase64 = body.imageBase64 as string | undefined
   // 샘플 폴백용으로만 물건 추정 (실제 AI는 자유서술 전체를 이해함)
   const item: ItemKey = situation ? inferItem(situation) : 'none'
 
@@ -109,7 +117,9 @@ export async function POST(req: Request) {
         : ''
   const userMsg = [
     `아이 나이: ${ageLabel}`,
+    interests.length ? `아이 관심사: ${interests.join(', ')}` : '',
     situation ? `지금 상황(부모가 말한 그대로): "${situation}"` : '',
+    imageBase64 ? '첨부한 사진 속 물건·공간을 보고 놀이를 만들어줘.' : '',
     moodLine,
     messLine,
     excludeTitle ? `단, "${excludeTitle}"와는 다른 새로운 놀이로 제안해줘.` : '',
@@ -117,6 +127,24 @@ export async function POST(req: Request) {
   ]
     .filter(Boolean)
     .join('\n')
+
+  // 카메라 사진이 있으면 비전 입력으로 함께 전달
+  type Part =
+    | { type: 'text'; text: string }
+    | {
+        type: 'image'
+        source: { type: 'base64'; media_type: string; data: string }
+      }
+  const content: Part[] = [{ type: 'text', text: userMsg }]
+  if (imageBase64) {
+    const m = imageBase64.match(/^data:(image\/\w+);base64,(.+)$/)
+    if (m && m[1] && m[2]) {
+      content.unshift({
+        type: 'image',
+        source: { type: 'base64', media_type: m[1], data: m[2] },
+      })
+    }
+  }
 
   try {
     const client = new Anthropic({ apiKey: key })
@@ -126,7 +154,7 @@ export async function POST(req: Request) {
       max_tokens: 1024,
       system: SYSTEM,
       output_config: { format: { type: 'json_schema', schema: RECIPE_SCHEMA } },
-      messages: [{ role: 'user', content: userMsg }],
+      messages: [{ role: 'user', content }],
     }
     const res = await client.messages.create(params as never)
     const text =
