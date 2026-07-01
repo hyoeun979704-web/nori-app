@@ -65,6 +65,9 @@ export async function POST(req: Request) {
   // 자유서술(텍스트/음성): 재료·상황·아이 상태를 자연어로 그대로 받는다
   const situation = (body.situation as string | undefined)?.trim() ?? ''
   const excludeTitle = body.excludeTitle as string | undefined
+  // 실시간 상태 프리셋 (선택) — FunDad식 빠른 상태 지정
+  const mood = body.mood as 'calm' | 'active' | undefined
+  const mess = body.mess as 'clean' | 'messy' | undefined
   // 샘플 폴백용으로만 물건 추정 (실제 AI는 자유서술 전체를 이해함)
   const item: ItemKey = situation ? inferItem(situation) : 'none'
 
@@ -79,9 +82,23 @@ export async function POST(req: Request) {
   }
 
   const ageLabel = AGES.find((a) => a.key === age)?.label ?? '영유아'
+  const moodLine =
+    mood === 'calm'
+      ? '아이 상태: 지금 차분하게 진정시키고 싶어요.'
+      : mood === 'active'
+        ? '아이 상태: 에너지가 넘쳐서 기운을 빼주고 싶어요.'
+        : ''
+  const messLine =
+    mess === 'clean'
+      ? '정리: 최대한 안 흘리고 뒷정리 쉬운 놀이로.'
+      : mess === 'messy'
+        ? '정리: 좀 어질러져도 괜찮아요, 맘껏 놀아도 돼요.'
+        : ''
   const userMsg = [
     `아이 나이: ${ageLabel}`,
     situation ? `지금 상황(부모가 말한 그대로): "${situation}"` : '',
+    moodLine,
+    messLine,
     excludeTitle ? `단, "${excludeTitle}"와는 다른 새로운 놀이로 제안해줘.` : '',
     '이 상황에 맞는 놀이 하나를 만들어줘.',
   ]
