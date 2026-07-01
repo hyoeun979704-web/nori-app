@@ -25,7 +25,7 @@ export type Recipe = {
   emoji: string
   title: string
   prep: string
-  steps: [string, string, string]
+  steps: string[] // 순서 (보통 3단계)
   talk: string // 부모가 건네는 말 (언어 자극)
   grow: string // 발달 포인트
   safety: string // 안전 고지
@@ -247,6 +247,24 @@ function fallback(age: AgeKey, item: ItemKey): Recipe {
     },
   }
   return byAge[age]
+}
+
+// 음성/자유 텍스트에서 물건 추정 (키 없을 때 샘플 폴백용)
+export function inferItem(text: string): ItemKey {
+  const t = text.replace(/\s/g, '')
+  const map: [string[], ItemKey][] = [
+    [['수건', '타월'], 'towel'],
+    [['종이컵', '컵'], 'cup'],
+    [['양말'], 'sock'],
+    [['휴지심', '휴지', '심지'], 'tube'],
+    [['박스', '상자'], 'box'],
+    [['빨래집게', '집게'], 'clip'],
+    [['맨몸', '아무것도', '없어', '없다'], 'none'],
+  ]
+  for (const [keys, item] of map) {
+    if (keys.some((k) => t.includes(k))) return item
+  }
+  return 'none'
 }
 
 // 같은 연령대의 다른 놀이 하나 (breadth 시연용 — "다른 놀이" 버튼)

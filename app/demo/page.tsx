@@ -1,48 +1,110 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   AGES,
   ITEMS,
-  matchRecipes,
-  anyRecipeForAge,
   type AgeKey,
   type ItemKey,
   type Recipe,
 } from '@/lib/demo/recipes'
 
+type Source = 'ai' | 'sample' | 'sample-fallback'
+
 export default function DemoPage() {
   const [age, setAge] = useState<AgeKey | null>(null)
   const [item, setItem] = useState<ItemKey | null>(null)
+  const [voiceText, setVoiceText] = useState('')
+  const [listening, setListening] = useState(false)
+  const [voiceSupported, setVoiceSupported] = useState(false)
   const [loading, setLoading] = useState(false)
   const [recipe, setRecipe] = useState<Recipe | null>(null)
+  const [source, setSource] = useState<Source | null>(null)
 
-  const canGenerate = age !== null && item !== null
+  const recognitionRef = useRef<{ start: () => void; stop: () => void } | null>(
+    null,
+  )
 
-  function generate() {
-    if (!age || !item) return
-    setLoading(true)
-    setRecipe(null)
-    setTimeout(() => {
-      const matches = matchRecipes(age, item)
-      setRecipe(matches[0] ?? null)
-      setLoading(false)
-    }, 750)
+  // Web Speech API (브라우저 내장 STT) — 백엔드 없이 음성 검색
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const SR =
+      (window as unknown as { SpeechRecognition?: new () => never })
+        .SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: new () => never })
+        .webkitSpeechRecognition
+    if (!SR) return
+    setVoiceSupported(true)
+    const rec = new SR() as unknown as {
+      lang: string
+      interimResults: boolean
+      maxAlternatives: number
+      start: () => void
+      stop: () => void
+      onresult: (e: unknown) => void
+      onend: () => void
+      onerror: () => void
+    }
+    rec.lang = 'ko-KR'
+    rec.interimResults = false
+    rec.maxAlternatives = 1
+    rec.onresult = (e) => {
+      const transcript = (
+        e as { results?: Array<Array<{ transcript?: string }>> }
+      ).results?.[0]?.[0]?.transcript
+      if (transcript) setVoiceText(transcript)
+    }
+    rec.onend = () => setListening(false)
+    rec.onerror = () => setListening(false)
+    recognitionRef.current = rec
+  }, [])
+
+  function toggleMic() {
+    const rec = recognitionRef.current
+    if (!rec) return
+    if (listening) {
+      rec.stop()
+      setListening(false)
+    } else {
+      setVoiceText('')
+      setListening(true)
+      rec.start()
+    }
   }
 
-  function another() {
+  const canGenerate = age !== null && (item !== null || voiceText.trim() !== '')
+
+  async function callApi(excludeTitle?: string) {
     if (!age) return
     setLoading(true)
-    setTimeout(() => {
-      setRecipe((prev) => anyRecipeForAge(age, prev?.title))
+    if (!excludeTitle) setRecipe(null)
+    try {
+      const res = await fetch('/api/recipe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          age,
+          item,
+          voiceText: voiceText.trim() || undefined,
+          excludeTitle,
+        }),
+      })
+      const data = await res.json()
+      setRecipe(data.recipe)
+      setSource(data.source)
+    } catch {
+      setRecipe(null)
+    } finally {
       setLoading(false)
-    }, 600)
+    }
   }
 
   function reset() {
     setAge(null)
     setItem(null)
+    setVoiceText('')
     setRecipe(null)
+    setSource(null)
   }
 
   return (
@@ -101,8 +163,29 @@ export default function DemoPage() {
             ))}
           </div>
 
+          {/* 음성 검색 */}
+          {voiceSupported && (
+            <div className="mt-5">
+              <button
+                onClick={toggleMic}
+                className={`flex w-full items-center justify-center gap-2 rounded-2xl border py-3 font-medium transition active:scale-[0.98] ${
+                  listening
+                    ? 'border-rose-300 bg-rose-50 text-rose-600'
+                    : 'border-stone-200 bg-white text-stone-600'
+                }`}
+              >
+                {listening ? '🔴 듣고 있어요… (다시 눌러 멈춤)' : '🎤 말로 찾기'}
+              </button>
+              {voiceText && (
+                <p className="mt-2 rounded-xl bg-stone-50 px-3 py-2 text-sm text-stone-500">
+                  “{voiceText}”
+                </p>
+              )}
+            </div>
+          )}
+
           <button
-            onClick={generate}
+            onClick={() => callApi()}
             disabled={!canGenerate || loading}
             className="mt-6 w-full rounded-2xl bg-amber-500 py-4 text-lg font-bold text-white transition active:scale-[0.98] disabled:bg-stone-200 disabled:text-stone-400"
           >
@@ -113,7 +196,14 @@ export default function DemoPage() {
         {/* ── 결과: "뭘 할 수 있는데?"의 증거 ── */}
         {recipe && !loading && (
           <section className="mt-6 rounded-3xl bg-white p-6 shadow-sm ring-1 ring-amber-100">
-            <div className="text-3xl">{recipe.emoji}</div>
+            <div className="flex items-center justify-between">
+              <div className="text-3xl">{recipe.emoji}</div>
+              {source === 'ai' && (
+                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                  실시간 AI 생성
+                </span>
+              )}
+            </div>
             <h2 className="mt-2 text-xl font-bold text-stone-900">
               {recipe.title}
             </h2>
@@ -121,7 +211,10 @@ export default function DemoPage() {
 
             <ol className="mt-4 space-y-2">
               {recipe.steps.map((s, idx) => (
-                <li key={idx} className="flex gap-2.5 text-[15px] leading-relaxed">
+                <li
+                  key={idx}
+                  className="flex gap-2.5 text-[15px] leading-relaxed"
+                >
                   <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-amber-100 text-xs font-bold text-amber-700">
                     {idx + 1}
                   </span>
@@ -136,7 +229,7 @@ export default function DemoPage() {
 
             <div className="mt-5 flex gap-2">
               <button
-                onClick={another}
+                onClick={() => callApi(recipe.title)}
                 className="flex-1 rounded-2xl bg-amber-50 py-3 font-semibold text-amber-700 transition active:scale-[0.98]"
               >
                 다른 놀이
