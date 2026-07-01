@@ -5,7 +5,6 @@ import {
   anyRecipeForAge,
   inferItem,
   AGES,
-  ITEMS,
   type AgeKey,
   type ItemKey,
 } from '@/lib/demo/recipes'
@@ -28,6 +27,12 @@ const SYSTEM = `너는 0~5세 영유아 놀이 전문가이자 아동 안전 전
 [부모-아이 유대]
 - 눈맞춤, 함께 웃기, 스킨십, 주고받는 상호작용을 놀이 안에 녹여라.
 - 부모가 아이에게 건넬 구체적인 말 한마디(talk)를 반드시 포함해 언어 자극을 돕는다.
+
+[예상치 못한 조합·실시간 상황 대응 — 핵심]
+- 부모가 어떤 재료나 상황을 말하든(흔치 않은 조합이라도) 절대 "그건 못 한다"고 하지 마라. 가진 것에 맞춰 놀이를 새로 만들어내라. 이게 너의 가장 중요한 능력이다.
+- 아이의 현재 상태가 언급되면 거기에 맞춰라: 칭얼대거나 지쳐 있으면 차분히 진정시키는 놀이, 에너지가 넘치면 발산하는 놀이, 졸려 하면 잔잔한 놀이로.
+- 시간·장소(밤, 외출 중, 차 안, 좁은 방 등)가 언급되면 그 제약에 맞춰라.
+- 말한 재료가 그 연령에 위험하면, 짧게 위험을 알리고 안전한 대체 놀이를 제안하라.
 
 [형식]
 - 준비물은 부모가 말한 물건 + 어느 집에나 있는 흔한 물건을 전제로.
@@ -57,11 +62,11 @@ const RECIPE_SCHEMA = {
 export async function POST(req: Request) {
   const body = await req.json()
   const age = body.age as AgeKey
-  const voiceText = (body.voiceText as string | undefined)?.trim()
+  // 자유서술(텍스트/음성): 재료·상황·아이 상태를 자연어로 그대로 받는다
+  const situation = (body.situation as string | undefined)?.trim() ?? ''
   const excludeTitle = body.excludeTitle as string | undefined
-  // 물건: 칩 선택값 우선, 없으면 음성에서 추정
-  const item = (body.item as ItemKey | undefined) ??
-    (voiceText ? inferItem(voiceText) : 'none')
+  // 샘플 폴백용으로만 물건 추정 (실제 AI는 자유서술 전체를 이해함)
+  const item: ItemKey = situation ? inferItem(situation) : 'none'
 
   const key = process.env.ANTHROPIC_API_KEY
 
@@ -74,13 +79,11 @@ export async function POST(req: Request) {
   }
 
   const ageLabel = AGES.find((a) => a.key === age)?.label ?? '영유아'
-  const itemLabel = ITEMS.find((i) => i.key === item)?.label ?? '집에 있는 물건'
   const userMsg = [
     `아이 나이: ${ageLabel}`,
-    `집에 있는 것: ${itemLabel}`,
-    voiceText ? `부모가 한 말: "${voiceText}"` : '',
+    situation ? `지금 상황(부모가 말한 그대로): "${situation}"` : '',
     excludeTitle ? `단, "${excludeTitle}"와는 다른 새로운 놀이로 제안해줘.` : '',
-    '이 조건으로 놀이 하나를 제안해줘.',
+    '이 상황에 맞는 놀이 하나를 만들어줘.',
   ]
     .filter(Boolean)
     .join('\n')

@@ -1,20 +1,16 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import {
-  AGES,
-  ITEMS,
-  type AgeKey,
-  type ItemKey,
-  type Recipe,
-} from '@/lib/demo/recipes'
+import { AGES, type AgeKey, type Recipe } from '@/lib/demo/recipes'
 
 type Source = 'ai' | 'sample' | 'sample-fallback'
 
+// 빈칸 부담을 더는 예시 버튼 (누르면 자유서술에 덧붙는다)
+const QUICK = ['수건', '종이컵', '양말', '휴지심', '박스', '빨래집게', '맨몸']
+
 export default function DemoPage() {
   const [age, setAge] = useState<AgeKey | null>(null)
-  const [item, setItem] = useState<ItemKey | null>(null)
-  const [voiceText, setVoiceText] = useState('')
+  const [situation, setSituation] = useState('')
   const [listening, setListening] = useState(false)
   const [voiceSupported, setVoiceSupported] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -25,7 +21,7 @@ export default function DemoPage() {
     null,
   )
 
-  // Web Speech API (브라우저 내장 STT) — 백엔드 없이 음성 검색
+  // Web Speech API (브라우저 내장 STT) — 백엔드 없이 음성 입력
   useEffect(() => {
     if (typeof window === 'undefined') return
     const SR =
@@ -52,7 +48,9 @@ export default function DemoPage() {
       const transcript = (
         e as { results?: Array<Array<{ transcript?: string }>> }
       ).results?.[0]?.[0]?.transcript
-      if (transcript) setVoiceText(transcript)
+      if (transcript) {
+        setSituation((prev) => (prev ? prev + ' ' : '') + transcript)
+      }
     }
     rec.onend = () => setListening(false)
     rec.onerror = () => setListening(false)
@@ -66,13 +64,16 @@ export default function DemoPage() {
       rec.stop()
       setListening(false)
     } else {
-      setVoiceText('')
       setListening(true)
       rec.start()
     }
   }
 
-  const canGenerate = age !== null && (item !== null || voiceText.trim() !== '')
+  function addQuick(word: string) {
+    setSituation((prev) => (prev ? prev + ' ' + word : word))
+  }
+
+  const canGenerate = age !== null && situation.trim() !== ''
 
   async function callApi(excludeTitle?: string) {
     if (!age) return
@@ -82,12 +83,7 @@ export default function DemoPage() {
       const res = await fetch('/api/recipe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          age,
-          item,
-          voiceText: voiceText.trim() || undefined,
-          excludeTitle,
-        }),
+        body: JSON.stringify({ age, situation: situation.trim(), excludeTitle }),
       })
       const data = await res.json()
       setRecipe(data.recipe)
@@ -101,8 +97,7 @@ export default function DemoPage() {
 
   function reset() {
     setAge(null)
-    setItem(null)
-    setVoiceText('')
+    setSituation('')
     setRecipe(null)
     setSource(null)
   }
@@ -119,21 +114,21 @@ export default function DemoPage() {
             노리
           </h1>
           <p className="mx-auto mt-4 max-w-xs text-lg leading-relaxed text-stone-600">
-            “오늘 뭐 하고 놀지?” 하고 물으면,
+            지금 우리 집 상황을 말하면,
             <br />
-            지금 집에 있는 걸로 우리 아이한테
+            우리 아이한테 딱 맞는 놀이를
             <br />
-            딱 맞는 놀이를 만들어줘요.
+            그 자리에서 만들어줘요.
           </p>
         </header>
 
-        {/* ── 터닝포인트: 직접 해보게 만드는 데모 ── */}
+        {/* ── 터닝포인트: 자유서술 → 즉석 놀이 ── */}
         <section className="mt-10 rounded-3xl bg-white p-6 shadow-sm ring-1 ring-stone-100">
           <p className="text-center text-base font-semibold text-stone-800">
             지금 한번 해볼까요?
           </p>
 
-          {/* 나이 */}
+          {/* 나이 (안전·발달 기준) */}
           <p className="mt-6 mb-2 text-sm font-medium text-stone-500">
             우리 아이는 몇 살이에요?
           </p>
@@ -148,46 +143,49 @@ export default function DemoPage() {
             ))}
           </div>
 
-          {/* 물건 */}
+          {/* 자유서술: 상황·재료·아이 상태 무엇이든 */}
           <p className="mt-5 mb-2 text-sm font-medium text-stone-500">
-            지금 집에 뭐가 있어요?
+            지금 상황을 편하게 말해주세요
           </p>
-          <div className="flex flex-wrap gap-2">
-            {ITEMS.map((i) => (
-              <Chip
-                key={i.key}
-                active={item === i.key}
-                onClick={() => setItem(i.key)}
-                label={`${i.emoji} ${i.label}`}
-              />
+          <textarea
+            value={situation}
+            onChange={(e) => setSituation(e.target.value)}
+            rows={3}
+            placeholder="예: 비 오는 날인데 애가 계속 칭얼대요. 집엔 페트병이랑 스카프밖에 없어요."
+            className="w-full resize-none rounded-2xl border border-stone-200 bg-white px-4 py-3 text-[15px] leading-relaxed text-stone-700 outline-none placeholder:text-stone-300 focus:border-amber-400"
+          />
+
+          {/* 예시 버튼 (빈칸 부담 완화) */}
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {QUICK.map((w) => (
+              <button
+                key={w}
+                onClick={() => addQuick(w)}
+                className="rounded-full bg-stone-100 px-3 py-1 text-xs text-stone-500 active:scale-95"
+              >
+                + {w}
+              </button>
             ))}
           </div>
 
-          {/* 음성 검색 */}
+          {/* 음성 입력 */}
           {voiceSupported && (
-            <div className="mt-5">
-              <button
-                onClick={toggleMic}
-                className={`flex w-full items-center justify-center gap-2 rounded-2xl border py-3 font-medium transition active:scale-[0.98] ${
-                  listening
-                    ? 'border-rose-300 bg-rose-50 text-rose-600'
-                    : 'border-stone-200 bg-white text-stone-600'
-                }`}
-              >
-                {listening ? '🔴 듣고 있어요… (다시 눌러 멈춤)' : '🎤 말로 찾기'}
-              </button>
-              {voiceText && (
-                <p className="mt-2 rounded-xl bg-stone-50 px-3 py-2 text-sm text-stone-500">
-                  “{voiceText}”
-                </p>
-              )}
-            </div>
+            <button
+              onClick={toggleMic}
+              className={`mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border py-3 font-medium transition active:scale-[0.98] ${
+                listening
+                  ? 'border-rose-300 bg-rose-50 text-rose-600'
+                  : 'border-stone-200 bg-white text-stone-600'
+              }`}
+            >
+              {listening ? '🔴 듣고 있어요… (다시 눌러 멈춤)' : '🎤 말로 하기'}
+            </button>
           )}
 
           <button
             onClick={() => callApi()}
             disabled={!canGenerate || loading}
-            className="mt-6 w-full rounded-2xl bg-amber-500 py-4 text-lg font-bold text-white transition active:scale-[0.98] disabled:bg-stone-200 disabled:text-stone-400"
+            className="mt-4 w-full rounded-2xl bg-amber-500 py-4 text-lg font-bold text-white transition active:scale-[0.98] disabled:bg-stone-200 disabled:text-stone-400"
           >
             {loading ? '노리가 생각하고 있어요…' : '놀이 만들어줘'}
           </button>
@@ -243,7 +241,7 @@ export default function DemoPage() {
             </div>
 
             <p className="mt-5 text-center text-sm leading-relaxed text-stone-400">
-              방금 노리가 우리 아이에 맞춰 만든 놀이예요.
+              방금 노리가 지금 상황에 맞춰 만든 놀이예요.
               <br />
               매일, 집에 있는 것만으로요.
             </p>
