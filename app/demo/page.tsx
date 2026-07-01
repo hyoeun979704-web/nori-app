@@ -247,7 +247,19 @@ export default function DemoPage() {
             <h2 className="mt-2 text-xl font-bold text-stone-900">
               {recipe.title}
             </h2>
-            <p className="mt-1 text-sm text-stone-400">준비물 · {recipe.prep}</p>
+            {recipe.domains && recipe.domains.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {recipe.domains.map((d) => (
+                  <span
+                    key={d}
+                    className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700"
+                  >
+                    {d} 발달
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="mt-2 text-sm text-stone-400">준비물 · {recipe.prep}</p>
 
             <ol className="mt-4 space-y-2">
               {recipe.steps.map((s, idx) => (

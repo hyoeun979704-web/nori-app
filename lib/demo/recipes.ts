@@ -29,6 +29,25 @@ export type Recipe = {
   talk: string // 부모가 건네는 말 (언어 자극)
   grow: string // 발달 포인트
   safety: string // 안전 고지
+  domains?: string[] // 자라는 발달 영역 (BabySparks 차용)
+}
+
+// 놀이 내용에서 발달 영역 추출 (샘플용 — AI는 직접 태깅)
+export function deriveDomains(r: Recipe): string[] {
+  const t = `${r.title} ${r.grow} ${r.steps.join(' ')}`
+  const rules: [RegExp, string][] = [
+    [/대근육|뛰|점프|기어|균형|온몸|발산/, '대근육'],
+    [/소근육|손가락|집게|쌓|손동작|가위|오리|찢/, '소근육'],
+    [/인지|인과|기억|호기심|탐색|문제|색|순서|공간|대상영속/, '인지'],
+    [/언어|어휘|말|이야기|의성어|동사|이름/, '언어'],
+    [/사회|정서|애착|협력|역할|차례|교감|안정/, '사회정서'],
+    [/감각|촉감|전정/, '감각'],
+  ]
+  const found: string[] = []
+  for (const [re, d] of rules) {
+    if (re.test(t) && !found.includes(d)) found.push(d)
+  }
+  return found.slice(0, 3)
 }
 
 type RecipeEntry = Recipe & { item: ItemKey; ages: AgeKey[] }

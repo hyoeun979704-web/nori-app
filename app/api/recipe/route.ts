@@ -4,10 +4,17 @@ import {
   matchRecipes,
   anyRecipeForAge,
   inferItem,
+  deriveDomains,
   AGES,
   type AgeKey,
   type ItemKey,
+  type Recipe,
 } from '@/lib/demo/recipes'
+
+// 샘플에 발달 영역 태그를 붙여 반환 (AI 결과와 형식 통일)
+function withDomains(r: Recipe): Recipe {
+  return { ...r, domains: r.domains ?? deriveDomains(r) }
+}
 
 // 노리의 핵심 자산: "파인튜닝"이 아니라 이 프롬프트 설계가 성능을 만든다.
 // 안전 하드 제약(연령별 삼킴·질식 위험) + 발달 적합성 + 부모 상호작용 + 형식 고정.
@@ -53,9 +60,15 @@ const RECIPE_SCHEMA = {
     },
     talk: { type: 'string', description: '부모가 아이에게 건네는 말 한마디' },
     grow: { type: 'string', description: '이 놀이로 자라는 발달 영역 설명' },
+    domains: {
+      type: 'array',
+      items: { type: 'string' },
+      description:
+        '자라는 발달 영역 1~3개를 [대근육, 소근육, 인지, 언어, 사회정서, 자조] 중에서 태그로',
+    },
     safety: { type: 'string', description: '연령에 맞는 안전 고지' },
   },
-  required: ['emoji', 'title', 'prep', 'steps', 'talk', 'grow', 'safety'],
+  required: ['emoji', 'title', 'prep', 'steps', 'talk', 'grow', 'domains', 'safety'],
   additionalProperties: false,
 }
 
@@ -77,8 +90,8 @@ export async function POST(req: Request) {
   if (!key) {
     const sample = excludeTitle
       ? anyRecipeForAge(age, excludeTitle)
-      : matchRecipes(age, item)[0]
-    return NextResponse.json({ recipe: sample, source: 'sample' })
+      : matchRecipes(age, item)[0] ?? anyRecipeForAge(age)
+    return NextResponse.json({ recipe: withDomains(sample), source: 'sample' })
   }
 
   const ageLabel = AGES.find((a) => a.key === age)?.label ?? '영유아'
@@ -124,7 +137,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ recipe, source: 'ai' })
   } catch {
     // API 실패 시에도 시연이 끊기지 않게 샘플 폴백
-    const sample = matchRecipes(age, item)[0]
-    return NextResponse.json({ recipe: sample, source: 'sample-fallback' })
+    const sample = matchRecipes(age, item)[0] ?? anyRecipeForAge(age)
+    return NextResponse.json({
+      recipe: withDomains(sample),
+      source: 'sample-fallback',
+    })
   }
 }
